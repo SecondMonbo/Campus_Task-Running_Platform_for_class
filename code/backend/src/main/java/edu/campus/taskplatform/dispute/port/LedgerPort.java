@@ -1,0 +1,37 @@
+package edu.campus.taskplatform.dispute.port;
+
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * 账务公共服务端口。业务模块不得绕过该端口直接修改余额或流水。
+ *
+ * <p>实现必须加入调用方已有事务：余额变更与流水写入要么一起提交，要么一起回滚。</p>
+ */
+public interface LedgerPort {
+
+	/**
+	 * 释放发布任务时冻结的报酬，用于取消生效或管理员裁决取消。
+	 *
+	 * @param taskId 任务 ID
+	 * @param publisherId 发布者 ID
+	 * @param runnerId 跑腿员 ID；任务尚无跑腿员时可为 {@code null}
+	 * @param refundToPublisher 退回发布者可用余额的金额，不小于 0
+	 * @param payToRunner 计入跑腿员可用余额的金额，不小于 0
+	 */
+	void settleFrozenReward(UUID taskId, UUID publisherId, UUID runnerId, int refundToPublisher, int payToRunner);
+
+	/**
+	 * 从被申诉方可用余额向申诉方划转裁决金额，并写入双方关联流水。
+	 *
+	 * @return 两条流水的 ID（出账、入账），顺序稳定，供申诉记录回填
+	 * @throws edu.campus.taskplatform.common.error.ApiException 可用余额不足时抛出
+	 *         {@code INSUFFICIENT_BALANCE}（409）
+	 */
+	List<UUID> transferAvailable(UUID taskId, UUID appealId, UUID fromUserId, UUID toUserId, int amount);
+
+	/**
+	 * 查询用户当前可用余额；账户不存在时视为 0。
+	 */
+	int availableBalance(UUID userId);
+}
