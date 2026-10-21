@@ -1,0 +1,1883 @@
+openapi: 3.1.0
+info:
+  title: 校园跑腿平台 API
+  version: 1.0.0
+  description: |
+    根据 API约定.md 整理的首版接口契约，可导入 Apifox。
+    业务接口尚在开发中；没有在需求约定中明确的字段以最小可用契约表示，
+    实现前应由前后端负责人共同确认，确认后同步更新本文件。
+  contact:
+    name: Campus Task Platform Team
+servers:
+  - url: http://localhost:8080
+    description: 本机开发环境；非 localhost 部署必须使用 HTTPS
+tags:
+  - name: Auth
+    description: 注册、登录与会话
+  - name: Users
+    description: 当前用户资料
+  - name: Tasks
+    description: 跑腿任务与执行流程
+  - name: Wallet
+    description: 当前用户余额与交易流水
+  - name: Cancellations
+    description: 取消申请与取消裁决
+  - name: Appeals
+    description: 已完成任务申诉
+  - name: Notifications
+    description: 用户通知
+  - name: Complaints
+    description: 投诉与管理员处理
+  - name: Admin
+    description: 管理端查询
+  - name: System
+    description: CSRF 与健康检查
+
+security:
+  - sessionCookie: []
+
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: 注册普通用户
+      description: 写操作须携带 CSRF Token。请求中不得指定管理员角色。
+      operationId: register
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: 注册成功
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: 登录
+      description: 登录成功后创建服务端 Session。该写操作须携带 CSRF Token。
+      operationId: login
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: 退出登录
+      operationId: logout
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已退出登录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyDataResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: 获取当前登录用户
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/auth/csrf:
+    get:
+      tags: [System]
+      summary: 获取 CSRF Token
+      description: 返回后续写操作须放入 X-XSRF-TOKEN 请求头的 Token，并设置 XSRF-TOKEN Cookie。
+      operationId: getCsrfToken
+      security: []
+      responses:
+        '200':
+          description: CSRF Token
+          headers:
+            Set-Cookie:
+              description: XSRF-TOKEN Cookie；由前端读取后放入 X-XSRF-TOKEN 请求头。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsrfToken'
+
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: 查询本人资料
+      operationId: getMyProfile
+      responses:
+        '200':
+          description: 用户资料
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    patch:
+      tags: [Users]
+      summary: 修改本人资料
+      operationId: updateMyProfile
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: 修改后的用户资料
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/users/me/tasks:
+    get:
+      tags: [Tasks]
+      summary: 查询本人发布或接取的任务
+      operationId: listMyTasks
+      parameters:
+        - name: as
+          in: query
+          required: true
+          description: 查询当前用户作为发布者或跑腿员参与的任务
+          schema:
+            type: string
+            enum: [publisher, runner]
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TaskStatus'
+      responses:
+        '200':
+          description: 分页任务列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskPageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/tasks:
+    get:
+      tags: [Tasks]
+      summary: 浏览任务
+      operationId: listTasks
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TaskStatus'
+        - name: keyword
+          in: query
+          required: false
+          description: 可选标题或地点关键字；具体搜索范围由实现确认
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: 分页任务列表；没有符合条件的任务时 items 为空
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskPageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      tags: [Tasks]
+      summary: 发布任务
+      description: 创建任务和冻结发布者报酬须在同一事务中成功或回滚。
+      operationId: createTask
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+            example:
+              title: 代取资料
+              description: 到教学楼领取资料并送到宿舍区
+              reward: 30
+              deadline: '2026-10-18T09:00:00Z'
+              pickupLocation: 教学楼A座
+              deliveryLocation: 宿舍区
+      responses:
+        '201':
+          description: 任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/tasks/{taskId}:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Tasks]
+      summary: 查询任务详情
+      operationId: getTask
+      responses:
+        '200':
+          description: 任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    patch:
+      tags: [Tasks]
+      summary: 修改待接单任务
+      description: 仅发布者可修改本人仍处于 WAITING_FOR_TAKER 状态的任务。
+      operationId: updateTask
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: 修改后的任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/tasks/{taskId}/withdrawal:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      summary: 撤回待接单任务
+      description: 仅发布者可撤回本人尚未被接取的任务；暂存报酬按业务规则解冻。
+      operationId: withdrawTask
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawalRequest'
+      responses:
+        '200':
+          description: 撤回成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/tasks/{taskId}/acceptance:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      summary: 接取任务
+      description: 接单人从当前登录态识别。必须并发安全，同一任务最多允许一个接单请求成功。
+      operationId: acceptTask
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 接单成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/tasks/{taskId}/delivery:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      summary: 标记任务已送达
+      description: 仅任务跑腿员可执行；具体状态迁移须符合需求文档。
+      operationId: markTaskDelivered
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 任务已进入待验收状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/tasks/{taskId}/completion:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      summary: 确认任务完成
+      description: 仅任务发布者可确认；状态更新、报酬结算和流水写入须在同一事务中完成。
+      operationId: completeTask
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 任务已完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/tasks/{taskId}/reviews:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      summary: 提交任务评价
+      operationId: createTaskReview
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReviewRequest'
+      responses:
+        '201':
+          description: 评价已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/wallet:
+    get:
+      tags: [Wallet]
+      summary: 查询本人钱包
+      operationId: getMyWallet
+      responses:
+        '200':
+          description: 钱包余额
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/wallet/transactions:
+    get:
+      tags: [Wallet]
+      summary: 查询本人交易流水
+      operationId: listMyTransactions
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TransactionType'
+      responses:
+        '200':
+          description: 分页交易流水
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionPageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/tasks/{taskId}/cancellation-requests:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Cancellations]
+      summary: 发起任务取消申请
+      description: 仅任务参与者可对 IN_PROGRESS 或 WAITING_FOR_ACCEPTANCE 任务申请取消。
+      operationId: createCancellationRequest
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCancellationRequest'
+      responses:
+        '201':
+          description: 取消申请已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancellationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/cancellation-requests/{requestId}/response:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    post:
+      tags: [Cancellations]
+      summary: 应答取消申请
+      description: 被申请方可同意或拒绝；拒绝后申请转入待管理员处理，任务状态保持不变。
+      operationId: respondToCancellationRequest
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancellationResponseRequest'
+      responses:
+        '200':
+          description: 应答已记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancellationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/cancellation-requests:
+    get:
+      tags: [Cancellations, Admin]
+      summary: 管理员查询取消申请
+      operationId: listAdminCancellationRequests
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/CancellationStatus'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 分页取消申请
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancellationPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/cancellation-requests/{requestId}/arbitration:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    post:
+      tags: [Cancellations, Admin]
+      summary: 管理员裁决取消争议
+      description: 仅处理关联任务仍未完成的待管理员处理申请；裁决和必要账务操作须原子提交。
+      operationId: arbitrateCancellationRequest
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancellationArbitrationRequest'
+      responses:
+        '200':
+          description: 裁决完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancellationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/tasks/{taskId}/appeals:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Appeals]
+      summary: 对已完成任务提交申诉
+      description: 每个任务参与者最多提交一次；创建申诉不修改任务状态、余额或原结算流水。
+      operationId: createTaskAppeal
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAppealRequest'
+      responses:
+        '201':
+          description: 申诉已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppealResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/appeals:
+    get:
+      tags: [Appeals, Admin]
+      summary: 管理员查询申诉
+      operationId: listAdminAppeals
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/AppealStatus'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 分页申诉记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppealPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/appeals/{appealId}/decision:
+    parameters:
+      - $ref: '#/components/parameters/AppealId'
+    post:
+      tags: [Appeals, Admin]
+      summary: 管理员裁决申诉
+      description: 支持或部分支持时划转金额不得超过被申诉方当前可用余额；任务仍保持 COMPLETED，原结算流水不修改。
+      operationId: decideAppeal
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppealDecisionRequest'
+      responses:
+        '200':
+          description: 裁决完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppealResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: 查询本人通知
+      operationId: listNotifications
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: unreadOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: 分页通知
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/notifications/{notificationId}/read:
+    parameters:
+      - $ref: '#/components/parameters/NotificationId'
+    post:
+      tags: [Notifications]
+      summary: 标记通知已读
+      operationId: markNotificationRead
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 通知已标记为已读
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyDataResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/complaints:
+    post:
+      tags: [Complaints]
+      summary: 提交投诉
+      operationId: createComplaint
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateComplaintRequest'
+      responses:
+        '201':
+          description: 投诉已提交
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/complaints:
+    get:
+      tags: [Complaints, Admin]
+      summary: 管理员查询投诉
+      operationId: listAdminComplaints
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDING, PROCESSED]
+      responses:
+        '200':
+          description: 分页投诉记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/complaints/{complaintId}/actions:
+    parameters:
+      - $ref: '#/components/parameters/ComplaintId'
+    post:
+      tags: [Complaints, Admin]
+      summary: 管理员处理投诉
+      operationId: handleComplaint
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplaintActionRequest'
+      responses:
+        '200':
+          description: 投诉处理完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/users:
+    get:
+      tags: [Admin]
+      summary: 管理员查询用户
+      operationId: listAdminUsers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: 分页用户列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/transactions:
+    get:
+      tags: [Admin]
+      summary: 管理员查询交易记录
+      operationId: listAdminTransactions
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: taskId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 分页交易记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/operation-logs:
+    get:
+      tags: [Admin]
+      summary: 管理员查询操作日志
+      operationId: listAdminOperationLogs
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: actorId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 分页操作日志
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationLogPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /actuator/health:
+    get:
+      tags: [System]
+      summary: 后端健康检查
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: 后端健康
+          content:
+            application/vnd.spring-boot.actuator.v3+json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: UP
+                  groups:
+                    type: array
+                    items:
+                      type: string
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: JSESSIONID
+      description: Spring Session Cookie；登录成功后由服务端设置。
+
+  headers:
+    SessionCookie:
+      description: 服务端会话 Cookie；实际属性应包含 HttpOnly、SameSite=Lax，部署环境启用 Secure。
+      schema:
+        type: string
+      example: JSESSIONID=session-id; Path=/; HttpOnly; SameSite=Lax
+
+  parameters:
+    CsrfToken:
+      name: X-XSRF-TOKEN
+      in: header
+      required: true
+      description: 先调用 GET /api/v1/auth/csrf 获取 Token。浏览器客户端还应随请求携带服务端设置的 Cookie。
+      schema:
+        type: string
+    Page:
+      name: page
+      in: query
+      required: false
+      description: 从 0 开始的页码。
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      required: false
+      description: 每页数量只允许 10、20 或 50。
+      schema:
+        type: integer
+        enum: [10, 20, 50]
+        default: 10
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: string
+    AppealId:
+      name: appealId
+      in: path
+      required: true
+      schema:
+        type: string
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema:
+        type: string
+    ComplaintId:
+      name: complaintId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: 请求格式、参数或业务输入无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: VALIDATION_ERROR
+            message: 请求参数不合法
+            data: null
+    Unauthorized:
+      description: 未登录或会话已失效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: UNAUTHORIZED
+            message: 请先登录
+            data: null
+    Forbidden:
+      description: 已登录但无权执行此操作
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: FORBIDDEN
+            message: 无权执行此操作
+            data: null
+    NotFound:
+      description: 资源不存在或当前用户不可见
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: RESOURCE_NOT_FOUND
+            message: 未找到对应资源
+            data: null
+    Conflict:
+      description: 任务/申请状态冲突、余额不足、并发或重复操作
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: TASK_STATE_CONFLICT
+            message: 任务当前状态不允许此操作
+            data: null
+    ServerError:
+      description: 未预期的服务端错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: INTERNAL_ERROR
+            message: 服务暂时不可用
+            data: null
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: TASK_STATE_CONFLICT
+        message:
+          type: string
+          example: 任务当前状态不允许此操作
+        data:
+          type: 'null'
+
+    ApiResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          const: OK
+        message:
+          type: string
+          example: success
+        data: {}
+
+    EmptyDataResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: 'null'
+
+    PageInfo:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items:
+          type: array
+          items: {}
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          enum: [10, 20, 50]
+        total:
+          type: integer
+          minimum: 0
+
+    UserRole:
+      type: string
+      enum: [USER, ADMIN]
+    TaskStatus:
+      type: string
+      enum: [WAITING_FOR_TAKER, IN_PROGRESS, WAITING_FOR_ACCEPTANCE, COMPLETED, CANCELLED]
+    CancellationStatus:
+      type: string
+      enum: [PENDING_RESPONSE, PENDING_ADMIN, APPROVED, ARBITRATED]
+    AppealStatus:
+      type: string
+      enum: [PENDING, DECIDED]
+    AppealResult:
+      type: string
+      enum: [SUPPORTED, PARTIALLY_SUPPORTED, REJECTED]
+    TransactionType:
+      type: string
+      enum: [INCOME, EXPENSE, FINE, COMPENSATION, FREEZE, UNFREEZE]
+
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password, displayName]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        phone:
+          type: string
+          maxLength: 30
+          description: 可选联系方式；脱敏和可见范围由服务端权限控制。
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+
+    CsrfToken:
+      type: object
+      required: [headerName, parameterName, token]
+      properties:
+        headerName:
+          type: string
+          const: X-XSRF-TOKEN
+        parameterName:
+          type: string
+          example: _csrf
+        token:
+          type: string
+
+    User:
+      type: object
+      required: [userId, username, displayName, role]
+      properties:
+        userId:
+          type: string
+        username:
+          type: string
+        displayName:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+        phone:
+          type: [string, 'null']
+        creditScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        createdAt:
+          type: string
+          format: date-time
+
+    CurrentUserResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/User'
+
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        phone:
+          type: [string, 'null']
+          maxLength: 30
+
+    Task:
+      type: object
+      required: [taskId, title, description, reward, deadline, pickupLocation, deliveryLocation, status, publisherId, createdAt]
+      properties:
+        taskId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        reward:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        deadline:
+          type: string
+          format: date-time
+        pickupLocation:
+          type: string
+        deliveryLocation:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        publisherId:
+          type: string
+        runnerId:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [title, description, reward, deadline, pickupLocation, deliveryLocation]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        reward:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        deadline:
+          type: string
+          format: date-time
+        pickupLocation:
+          type: string
+          minLength: 1
+          maxLength: 200
+        deliveryLocation:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    UpdateTaskRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        reward:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        deadline:
+          type: string
+          format: date-time
+        pickupLocation:
+          type: string
+          minLength: 1
+          maxLength: 200
+        deliveryLocation:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    WithdrawalRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    TaskResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Task'
+    TaskPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Task'
+
+    CreateReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [score]
+      properties:
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+        content:
+          type: string
+          maxLength: 200
+    Review:
+      type: object
+      required: [reviewId, taskId, reviewerId, score, createdAt]
+      properties:
+        reviewId:
+          type: string
+        taskId:
+          type: string
+        reviewerId:
+          type: string
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+        content:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+    ReviewResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Review'
+
+    Wallet:
+      type: object
+      required: [availableBalance, frozenBalance]
+      properties:
+        availableBalance:
+          type: integer
+          minimum: 0
+        frozenBalance:
+          type: integer
+          minimum: 0
+    WalletResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Wallet'
+
+    Transaction:
+      type: object
+      required: [transactionId, type, amount, balanceAfter, createdAt]
+      properties:
+        transactionId:
+          type: string
+        userId:
+          type: string
+        taskId:
+          type: [string, 'null']
+        appealId:
+          type: [string, 'null']
+        type:
+          $ref: '#/components/schemas/TransactionType'
+        amount:
+          type: integer
+          description: 正数表示入账，负数表示出账。
+        balanceAfter:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+    TransactionPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Transaction'
+
+    CancellationStatusValue:
+      type: string
+      enum: [PENDING_RESPONSE, PENDING_ADMIN, APPROVED, ARBITRATED]
+    CancellationRequest:
+      type: object
+      required: [requestId, taskId, requesterId, reason, status, createdAt]
+      properties:
+        requestId:
+          type: string
+        taskId:
+          type: string
+        requesterId:
+          type: string
+        reason:
+          type: string
+        responseNote:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/CancellationStatusValue'
+        ruling:
+          type: [string, 'null']
+        refundAmount:
+          type: integer
+          minimum: 0
+        runnerAmount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+    CreateCancellationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 200
+    CancellationResponseRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [APPROVE, REJECT]
+        note:
+          type: string
+          maxLength: 500
+    CancellationArbitrationRequest:
+      type: object
+      additionalProperties: false
+      required: [ruling, refundAmount, runnerAmount, rulingDetail]
+      properties:
+        ruling:
+          type: string
+          enum: [SUPPORT_REQUESTER_CANCEL, SUPPORT_CONTINUE, CANCEL_PROPORTIONALLY]
+        refundAmount:
+          type: integer
+          minimum: 0
+        runnerAmount:
+          type: integer
+          minimum: 0
+        rulingDetail:
+          type: string
+          minLength: 1
+          maxLength: 500
+    CancellationResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/CancellationRequest'
+    CancellationPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/CancellationRequest'
+
+    Appeal:
+      type: object
+      required: [appealId, taskId, appellantId, respondentId, reason, description, status, createdAt]
+      properties:
+        appealId:
+          type: string
+        taskId:
+          type: string
+        appellantId:
+          type: string
+        respondentId:
+          type: string
+        reason:
+          type: string
+          enum: [FULFILLMENT_ISSUE, SETTLEMENT_ISSUE, OTHER]
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/AppealStatus'
+        result:
+          oneOf:
+            - $ref: '#/components/schemas/AppealResult'
+            - type: 'null'
+        transferAmount:
+          type: integer
+          minimum: 0
+        decisionNote:
+          type: [string, 'null']
+        transactionIds:
+          type: array
+          maxItems: 2
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: [string, 'null']
+          format: date-time
+    CreateAppealRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, description]
+      properties:
+        reason:
+          type: string
+          enum: [FULFILLMENT_ISSUE, SETTLEMENT_ISSUE, OTHER]
+        description:
+          type: string
+          minLength: 1
+          maxLength: 500
+    AppealDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [result, transferAmount, decisionNote]
+      properties:
+        result:
+          $ref: '#/components/schemas/AppealResult'
+        transferAmount:
+          type: integer
+          minimum: 0
+        decisionNote:
+          type: string
+          minLength: 1
+          maxLength: 500
+    AppealResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Appeal'
+    AppealPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Appeal'
+
+    Notification:
+      type: object
+      required: [notificationId, title, content, read, createdAt]
+      properties:
+        notificationId:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        read:
+          type: boolean
+        relatedTaskId:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+    NotificationPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Notification'
+
+    CreateComplaintRequest:
+      type: object
+      additionalProperties: false
+      required: [category, description]
+      properties:
+        taskId:
+          type: string
+        targetUserId:
+          type: string
+        category:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    ComplaintActionRequest:
+      type: object
+      additionalProperties: false
+      required: [actions, decisionNote]
+      properties:
+        actions:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [WARNING, CREDIT_ADJUSTMENT, FINANCIAL_ADJUSTMENT, FUNCTION_RESTRICTION, ACCOUNT_FREEZE, LOG_ONLY, OFFLINE_REFERRAL]
+        creditAdjustment:
+          type: integer
+        financialAdjustment:
+          type: integer
+        decisionNote:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    Complaint:
+      type: object
+      required: [complaintId, category, description, status, createdAt]
+      properties:
+        complaintId:
+          type: string
+        taskId:
+          type: [string, 'null']
+        category:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, PROCESSED]
+        createdAt:
+          type: string
+          format: date-time
+    ComplaintResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Complaint'
+    ComplaintPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Complaint'
+
+    UserPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/User'
+
+    OperationLog:
+      type: object
+      required: [logId, actorId, action, createdAt]
+      properties:
+        logId:
+          type: string
+        actorId:
+          type: string
+        action:
+          type: string
+        targetId:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+    OperationLogPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/OperationLog'
