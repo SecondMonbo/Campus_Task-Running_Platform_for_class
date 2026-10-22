@@ -1405,10 +1405,12 @@ components:
         title:
           type: string
           minLength: 1
+          pattern: '\S'
           maxLength: 100
         description:
           type: string
           minLength: 1
+          pattern: '\S'
           maxLength: 2000
         reward:
           type: integer
@@ -1420,10 +1422,12 @@ components:
         pickupLocation:
           type: string
           minLength: 1
+          pattern: '\S'
           maxLength: 200
         deliveryLocation:
           type: string
           minLength: 1
+          pattern: '\S'
           maxLength: 200
 
     WithdrawalRequest:
@@ -1472,13 +1476,15 @@ components:
           maxLength: 200
     Review:
       type: object
-      required: [reviewId, taskId, reviewerId, score, createdAt]
+      required: [reviewId, taskId, reviewerId, revieweeId, score, createdAt]
       properties:
         reviewId:
           type: string
         taskId:
           type: string
         reviewerId:
+          type: string
+        revieweeId:
           type: string
         score:
           type: integer

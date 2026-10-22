@@ -22,6 +22,7 @@ import java.time.temporal.ChronoUnit;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -86,6 +87,35 @@ class TaskControllerTest {
     }
 
     @Test
+    void update_task_rejects_empty_or_blank_text_fields() throws Exception {
+        String taskId = createTaskAndGetId();
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}", taskId)
+                        .with(user("u1").roles("USER"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}", taskId)
+                        .with(user("u1").roles("USER"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pickupLocation\":\"   \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}", taskId)
+                        .with(user("u1").roles("USER"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"更新后的标题\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("更新后的标题"));
+    }
+
+    @Test
     void list_tasks_200_empty_items() throws Exception {
         mockMvc.perform(get("/api/v1/tasks")
                         .with(user("u1").roles("USER")))
@@ -136,5 +166,22 @@ class TaskControllerTest {
                         .with(user("u1").roles("USER")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    private String createTaskAndGetId() throws Exception {
+        String body = """
+                {"title":"代取资料","description":"到教学楼领取资料并送到宿舍区",
+                 "reward":30,"deadline":"%s","pickupLocation":"教学楼A座","deliveryLocation":"宿舍区"}
+                """.formatted(Instant.now().plus(2, ChronoUnit.HOURS).toString());
+        String response = mockMvc.perform(post("/api/v1/tasks")
+                        .with(user("u1").roles("USER"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return response.replaceAll(".*\"taskId\":\"([^\"]+)\".*", "$1");
     }
 }

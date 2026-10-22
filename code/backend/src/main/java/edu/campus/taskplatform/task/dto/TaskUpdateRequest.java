@@ -3,6 +3,7 @@ package edu.campus.taskplatform.task.dto;
 import jakarta.validation.constraints.Future;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
@@ -13,9 +14,11 @@ import java.time.Instant;
  */
 public class TaskUpdateRequest {
 
+    @Pattern(regexp = "(?s).*\\S.*", message = "标题不能为空")
     @Size(max = 100, message = "标题长度不能超过100")
     private String title;
 
+    @Pattern(regexp = "(?s).*\\S.*", message = "描述不能为空")
     @Size(max = 2000, message = "描述长度不能超过2000")
     private String description;
 
@@ -26,9 +29,11 @@ public class TaskUpdateRequest {
     @Future(message = "截止时间必须晚于当前时间")
     private Instant deadline;
 
+    @Pattern(regexp = "(?s).*\\S.*", message = "取件地点不能为空")
     @Size(max = 200, message = "取件地点长度不能超过200")
     private String pickupLocation;
 
+    @Pattern(regexp = "(?s).*\\S.*", message = "送件地点不能为空")
     @Size(max = 200, message = "送件地点长度不能超过200")
     private String deliveryLocation;
 

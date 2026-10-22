@@ -2,10 +2,12 @@ package edu.campus.taskplatform.task;
 
 import edu.campus.taskplatform.accounting.DemoAccountingService;
 import edu.campus.taskplatform.auth.CurrentUser;
+import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
 import edu.campus.taskplatform.task.dto.CreateReviewRequest;
 import edu.campus.taskplatform.task.dto.TaskCreateRequest;
+import edu.campus.taskplatform.task.dto.TaskReviewView;
 import edu.campus.taskplatform.task.dto.TaskUpdateRequest;
 import edu.campus.taskplatform.task.dto.TaskView;
 import edu.campus.taskplatform.task.dto.WithdrawalRequest;
@@ -18,6 +20,8 @@ import org.springframework.test.context.TestPropertySource;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -274,7 +278,57 @@ class TaskServiceIntegrationTest {
         req.setContent("很好");
         TaskReview review = taskService.createReview(publisher, taskId, req);
         assertNotNull(review.getReviewId());
+        TaskReviewView view = TaskReviewView.from(review);
+        assertEquals("1", view.getReviewerId());
+        assertEquals("2", view.getRevieweeId());
         assertThrows(TaskException.class, () -> taskService.createReview(publisher, taskId, req));
+    }
+
+    @Test
+    void concurrent_duplicate_reviews_return_one_success_and_one_conflict() throws Exception {
+        String taskId = completedTask();
+        CreateReviewRequest req = new CreateReviewRequest();
+        req.setScore(5);
+        req.setContent("很好");
+
+        int threads = 2;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch go = new CountDownLatch(1);
+        List<Future<Boolean>> outcomes = new ArrayList<>();
+        try {
+            for (int i = 0; i < threads; i++) {
+                outcomes.add(pool.submit(() -> {
+                    ready.countDown();
+                    go.await();
+                    try {
+                        taskService.createReview(publisher, taskId, req);
+                        return true;
+                    } catch (TaskException conflict) {
+                        if (conflict.getErrorCode() != ErrorCode.DUPLICATE_ACTION) {
+                            throw conflict;
+                        }
+                        return false;
+                    }
+                }));
+            }
+            ready.await();
+            go.countDown();
+            int successes = 0;
+            int conflicts = 0;
+            for (Future<Boolean> outcome : outcomes) {
+                if (outcome.get()) {
+                    successes++;
+                } else {
+                    conflicts++;
+                }
+            }
+            assertEquals(1, successes);
+            assertEquals(1, conflicts);
+            assertEquals(1, reviewRepository.count());
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     // ---------------- 并发接单 ----------------

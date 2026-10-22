@@ -282,7 +282,7 @@ public class TaskService {
      */
     @Transactional
     public TaskReview createReview(CurrentUser publisher, String taskId, CreateReviewRequest req) {
-        Task task = requireTask(taskId);
+        Task task = requireTaskForUpdate(taskId);
         requireOwner(publisher, task);
         if (task.getStatus() != TaskStatus.COMPLETED) {
             throw new TaskException(ErrorCode.TASK_STATE_CONFLICT, "仅已完成任务可评价");
@@ -303,6 +303,11 @@ public class TaskService {
 
     private Task requireTask(String taskId) {
         return taskRepository.findById(taskId)
+                .orElseThrow(() -> new TaskException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在"));
+    }
+
+    private Task requireTaskForUpdate(String taskId) {
+        return taskRepository.findByIdForUpdate(taskId)
                 .orElseThrow(() -> new TaskException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在"));
     }
 

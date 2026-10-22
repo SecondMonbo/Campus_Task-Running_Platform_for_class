@@ -8,6 +8,7 @@ import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
 import edu.campus.taskplatform.task.dto.CreateReviewRequest;
 import edu.campus.taskplatform.task.dto.TaskCreateRequest;
+import edu.campus.taskplatform.task.dto.TaskReviewView;
 import edu.campus.taskplatform.task.dto.TaskUpdateRequest;
 import edu.campus.taskplatform.task.dto.TaskView;
 import edu.campus.taskplatform.task.dto.WithdrawalRequest;
@@ -100,9 +101,9 @@ public class TaskController {
     // 评价跑腿员
     @PostMapping("/tasks/{taskId}/reviews")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<TaskReview> createReview(@PathVariable String taskId,
-                                                @Valid @RequestBody CreateReviewRequest req) {
-        return ApiResponse.ok(taskService.createReview(current(), taskId, req));
+    public ApiResponse<TaskReviewView> createReview(@PathVariable String taskId,
+                                                    @Valid @RequestBody CreateReviewRequest req) {
+        return ApiResponse.ok(TaskReviewView.from(taskService.createReview(current(), taskId, req)));
     }
 
     // 我的任务（as=publisher | as=runner）
