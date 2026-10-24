@@ -1848,7 +1848,9 @@ input[readonly] {
   overflow: hidden;
   padding: 38px 38px 31px;
   color: #f7fbf7;
-  background: linear-gradient(153deg, #234f3e 4%, #1b3c31 61%, #18372f 100%);
+  background:
+    linear-gradient(135deg, rgba(24, 52, 69, 0.6), rgba(31, 74, 91, 0.55)),
+    url('./assets/login-bg.jpg') center / cover no-repeat;
 }
 .auth-brand {
   position: relative;
@@ -1871,8 +1873,8 @@ input[readonly] {
 .auth-brand small {
   display: block;
   margin-top: 3px;
-  color: #a9c1b4;
-  font-size: 8px;
+  color: #adbeb5;
+  font-size: 12px;
   letter-spacing: 1.8px;
 }
 .auth-intro-copy {
@@ -1881,21 +1883,21 @@ input[readonly] {
   margin-top: 104px;
 }
 .auth-intro-copy .eyebrow {
-  color: #a2c5aa;
-  font-size: 8px;
+  color: #96b79e;
+  font-size: 12px;
   letter-spacing: 1.7px;
 }
 .auth-intro-copy h1 {
   margin: 14px 0 11px;
   color: #fff;
-  font-size: 31px;
+  font-size: 35px;
   line-height: 1.55;
   letter-spacing: -0.6px;
 }
 .auth-intro-copy > p:last-child {
   max-width: 285px;
-  color: #c3d4ca;
-  font-size: 12px;
+  color: #bed4ca;
+  font-size: 14px;
 }
 .auth-decoration {
   position: relative;
@@ -1956,7 +1958,7 @@ input[readonly] {
   display: flex;
   justify-content: space-between;
   color: #a3afa7;
-  font-size: 9px;
+  font-size: 12px;
 }
 .auth-form-wrap {
   width: min(100%, 390px);
@@ -1964,18 +1966,18 @@ input[readonly] {
   padding: 30px 0;
 }
 .auth-form-wrap > .eyebrow {
-  margin-bottom: 4px;
+  margin-bottom: 4%;
   color: #6b9b7d;
 }
 .auth-form-wrap h2 {
   color: #243b36;
-  font-size: 26px;
+  font-size: 30px;
   letter-spacing: -0.5px;
 }
 .auth-subtitle {
   margin-top: 7px;
   color: #839187;
-  font-size: 11px;
+  font-size: 15px;
 }
 .auth-form {
   margin-top: 10px;
@@ -1984,13 +1986,13 @@ input[readonly] {
   margin-top: 16px;
   gap: 7px;
   color: #586e61;
-  font-size: 11px;
+  font-size: 14px;
 }
 .auth-form .field input {
   width: 100%;
   min-height: 42px;
   color: #34483e;
-  font-size: 12px;
+  font-size: 15px;
 }
 .optional-label {
   display: inline;
@@ -2008,7 +2010,7 @@ input[readonly] {
   margin-top: 19px;
   color: #8c9991;
   text-align: center;
-  font-size: 11px;
+  font-size: 14px;
 }
 .auth-switch a {
   margin-left: 4px;
@@ -2019,7 +2021,7 @@ input[readonly] {
   margin-top: 37px;
   color: #a6b0a9;
   text-align: center;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 /* Task discovery */

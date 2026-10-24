@@ -69,7 +69,7 @@ async function submit() {
     <section class="auth-card" :class="{ 'register-card': registering }">
       <aside class="auth-intro">
         <RouterLink to="/login" class="auth-brand">
-          <span class="brand-symbol"><AppIcon name="campus" :size="27" /></span>
+          <span class="brand-symbol"><AppIcon name="pin" :size="27" /></span>
           <span>
             <strong>校园跑腿</strong>
             <small>CAMPUS ERRANDS</small>
@@ -78,7 +78,7 @@ async function submit() {
         <div class="auth-intro-copy">
           <p class="eyebrow">A LITTLE HELP, A BETTER CAMPUS</p>
           <h1>校园里的每一程，<br />都有人接力。</h1>
-          <p>浏览校园任务，了解每一份需求的当前状态。</p>
+          <p>送的不仅是物品，<br />更是一份准时抵达的安心和便利。</p>
         </div>
         <div class="auth-decoration" aria-hidden="true">
           <span class="auth-orbit orbit-one" />
@@ -101,8 +101,8 @@ async function submit() {
           <h2 :id="registering ? 'register-title' : 'login-title'">
             {{ registering ? '创建你的账号' : '欢迎回来' }}
           </h2>
-          <p class="auth-subtitle">
-            {{ registering ? '填写基本信息，开始发现校园里的帮忙需求。' : '登录后查看任务列表和当前状态。' }}
+          <p v-if="registering" class="auth-subtitle">
+            填写基本信息，开始发现校园里的帮忙需求。
           </p>
 
           <form class="auth-form" @submit.prevent="submit">
@@ -179,7 +179,6 @@ async function submit() {
               {{ registering ? '返回登录' : '立即注册' }}
             </RouterLink>
           </p>
-          <p class="auth-privacy">密码由服务端安全处理；会话凭证仅保存在 HttpOnly Cookie 中。</p>
         </div>
       </section>
     </section>
