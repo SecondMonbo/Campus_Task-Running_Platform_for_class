@@ -1,11 +1,24 @@
-# 前端开发
+# 前端 A 第 1 周演示
 
-本目录是 Vue 3 + Vite 前端工程。完整开发环境启动方式见 [`../README.md`](../README.md)。
+本周交付只有登录/注册页和任务列表页。任务列表用本地 Mock 展示 OpenAPI 中定义的五种任务状态。
 
-常用命令：
+## 本地运行
+
+需要 Node.js `20.19+` 或 `22.12+`。在 PowerShell 中进入 `code\frontend` 后运行：
 
 ```powershell
-npm install
-npm run dev
-npm run build
+npm.cmd ci
+npm.cmd run dev:demo
 ```
+
+打开终端显示的 `Local` 地址，通常是 `http://localhost:5173/login`。先注册演示账号即可查看任务列表。不需要启动后端或数据库。
+
+Mock 账号和任务保存在当前服务进程内；停止或重启服务后会重置。此模式用于页面演示，不保存真实业务数据。
+
+## 连接真实后端
+
+运行 `npm.cmd run dev` 可启动常规开发模式。Vite 会把 `/api` 和 `/actuator` 请求代理到 `http://localhost:8080`。后端与数据库的启动说明见 [`../README.md`](../README.md)。
+
+## OpenAPI 字段
+
+字段与状态定义以 `../development_doc/openapi.yaml` 为准。完成依赖安装后，可运行 `npm.cmd run build` 检查生产构建，再用 `npm.cmd run preview` 预览构建结果。
