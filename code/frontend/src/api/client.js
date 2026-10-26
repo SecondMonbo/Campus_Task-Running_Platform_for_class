@@ -22,9 +22,11 @@ export function createApiClient({
   timeout = 15000,
 } = {}) {
   let csrfPromise
+  let authenticationVersion = 0
   const prefix = baseUrl.replace(/\/$/, '')
 
   async function send(path, { method = 'GET', query, body, signal, headers = {} } = {}) {
+    const startedAt = authenticationVersion
     const params = new URLSearchParams()
     Object.entries(query ?? {}).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== '') params.set(key, String(value))
@@ -50,21 +52,30 @@ export function createApiClient({
       try {
         payload = await response.json()
       } catch {
-        throw new ApiError(
-          statusMessages[response.status] ?? '服务返回了无法读取的数据。',
-          response.status,
-          'INVALID_RESPONSE',
-        )
+        if (response.ok)
+          throw new ApiError('服务返回了无法读取的数据。', response.status, 'INVALID_RESPONSE')
       }
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) csrfPromise = undefined
-        if (response.status === 401 && typeof globalThis.dispatchEvent === 'function') {
+        if (startedAt === authenticationVersion && [401, 403].includes(response.status))
+          csrfPromise = undefined
+        const authenticationProbe = [
+          '/api/v1/auth/me',
+          '/api/v1/auth/login',
+          '/api/v1/auth/register',
+        ].includes(path)
+        if (
+          response.status === 401 &&
+          !authenticationProbe &&
+          startedAt === authenticationVersion &&
+          typeof globalThis.dispatchEvent === 'function'
+        ) {
           globalThis.dispatchEvent(new Event('campus:auth-expired'))
         }
         throw new ApiError(
           payload?.message || statusMessages[response.status] || '请求失败，请稍后重试。',
           response.status,
-          payload?.code,
+          payload?.code ?? 'HTTP_ERROR',
         )
       }
       return payload
@@ -114,6 +125,14 @@ export function createApiClient({
           0,
           payload?.code ?? 'INVALID_RESPONSE',
         )
+      }
+      if (
+        options.method === 'POST' &&
+        ['/auth/login', '/auth/register', '/auth/logout'].includes(path)
+      ) {
+        // Spring Security rotates/clears CSRF state across authentication changes.
+        authenticationVersion += 1
+        csrfPromise = undefined
       }
       return payload.data
     },

@@ -11,6 +11,7 @@ const keywordInput = ref('')
 const keyword = ref('')
 const status = ref('')
 const isDemo = import.meta.env.MODE === 'demo'
+const isMock = import.meta.env.MODE === 'apifox'
 const backendHealth = ref(isDemo ? 'demo' : 'checking')
 let healthController
 const { items, total, loading, error, page, size, reload } = usePaged(
@@ -24,13 +25,14 @@ const statusTabs = [
 ]
 const backendHealthLabel = computed(() => {
   if (isDemo) return '本地演示数据'
+  if (isMock) return 'Apifox Mock 数据'
   if (backendHealth.value === 'up') return '后端服务正常'
   if (backendHealth.value === 'checking') return '正在检查后端'
   return '后端暂不可用'
 })
 
 async function checkBackendHealth() {
-  if (isDemo) return
+  if (isDemo || isMock) return
   healthController?.abort()
   const controller = new AbortController()
   healthController = controller
@@ -52,7 +54,7 @@ async function checkBackendHealth() {
 }
 
 onMounted(() => {
-  if (!isDemo) checkBackendHealth()
+  if (!isDemo && !isMock) checkBackendHealth()
 })
 onBeforeUnmount(() => healthController?.abort())
 
@@ -71,7 +73,11 @@ function clearSearch() {
     <div class="task-hall-hero">
       <div class="task-hall-copy">
         <p class="eyebrow">CAMPUS TASKS</p>
-        <h1>让校园里的小事，<br />更容易完成。</h1>
+        <h1>
+          让校园里的小事，
+          <br />
+          更容易完成。
+        </h1>
         <p>浏览校园里的取送需求，查看每个任务当前所处的状态。</p>
       </div>
       <div class="task-hall-art" aria-hidden="true">
@@ -80,7 +86,11 @@ function clearSearch() {
         <span class="art-pin pin-a"><AppIcon name="pin" :size="21" /></span>
         <span class="art-pin pin-b"><AppIcon name="campus" :size="21" /></span>
         <span class="art-card"><AppIcon name="arrow" :size="20" /></span>
-        <span class="art-caption">每一次帮忙<br />都让校园更近一点</span>
+        <span class="art-caption">
+          每一次帮忙
+          <br />
+          都让校园更近一点
+        </span>
       </div>
     </div>
 
@@ -94,7 +104,7 @@ function clearSearch() {
         <button
           class="backend-health"
           :class="backendHealth"
-          :disabled="isDemo || backendHealth === 'checking'"
+          :disabled="isDemo || isMock || backendHealth === 'checking'"
           :aria-label="`${backendHealthLabel}，点击重新检查`"
           @click="checkBackendHealth"
         >
@@ -113,11 +123,7 @@ function clearSearch() {
         <label class="task-search-box">
           <AppIcon name="search" :size="18" />
           <span class="sr-only">按标题或地点搜索</span>
-          <input
-            v-model="keywordInput"
-            maxlength="100"
-            placeholder="搜索任务标题或地点关键字"
-          />
+          <input v-model="keywordInput" maxlength="100" placeholder="搜索任务标题或地点关键字" />
           <button
             v-if="keywordInput || keyword"
             type="button"
@@ -163,7 +169,12 @@ function clearSearch() {
               </span>
               <span class="task-reference">发布于 {{ formatDate(task.createdAt, true) }}</span>
             </div>
-            <span class="task-title">{{ task.title }}</span>
+            <RouterLink
+              :to="{ name: 'task-detail', params: { taskId: task.taskId } }"
+              class="task-title"
+            >
+              {{ task.title }}
+            </RouterLink>
             <p class="task-description">{{ task.description }}</p>
             <div class="task-route">
               <div>
@@ -184,6 +195,13 @@ function clearSearch() {
                 <strong>{{ formatNumber(task.reward) }}</strong>
                 <span>虚拟币</span>
               </div>
+              <RouterLink
+                :to="{ name: 'task-detail', params: { taskId: task.taskId } }"
+                class="detail-link"
+              >
+                查看详情
+                <AppIcon name="chevron" :size="14" />
+              </RouterLink>
             </div>
           </article>
         </div>

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/index.js'
 import { notify, setSession } from '../composables/state.js'
 import AppIcon from '../components/AppIcon.vue'
+import { safeDestination } from '../domain/auth.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,16 +24,7 @@ watch(registering, () => {
 })
 
 function redirectAfterAuth() {
-  const destination = route.query.redirect
-  if (
-    typeof destination !== 'string' ||
-    !destination.startsWith('/') ||
-    destination.startsWith('//') ||
-    destination.includes('\\') ||
-    ['/login', '/register'].includes(destination.split(/[?#]/, 1)[0])
-  )
-    return '/tasks'
-  return destination
+  return safeDestination(route.query.redirect)
 }
 
 async function submit() {
@@ -77,8 +69,16 @@ async function submit() {
         </RouterLink>
         <div class="auth-intro-copy">
           <p class="eyebrow">A LITTLE HELP, A BETTER CAMPUS</p>
-          <h1>校园里的每一程，<br />都有人接力。</h1>
-          <p>送的不仅是物品，<br />更是一份准时抵达的安心和便利。</p>
+          <h1>
+            校园里的每一程，
+            <br />
+            都有人接力。
+          </h1>
+          <p>
+            送的不仅是物品，
+            <br />
+            更是一份准时抵达的安心和便利。
+          </p>
         </div>
         <div class="auth-decoration" aria-hidden="true">
           <span class="auth-orbit orbit-one" />
@@ -101,9 +101,7 @@ async function submit() {
           <h2 :id="registering ? 'register-title' : 'login-title'">
             {{ registering ? '创建你的账号' : '欢迎回来' }}
           </h2>
-          <p v-if="registering" class="auth-subtitle">
-            填写基本信息，开始发现校园里的帮忙需求。
-          </p>
+          <p v-if="registering" class="auth-subtitle">填写基本信息，开始发现校园里的帮忙需求。</p>
 
           <form class="auth-form" @submit.prevent="submit">
             <label class="field">
@@ -131,7 +129,10 @@ async function submit() {
               />
             </label>
             <label v-if="registering" class="field">
-              <span>联系方式 <small class="optional-label">选填</small></span>
+              <span>
+                联系方式
+                <small class="optional-label">选填</small>
+              </span>
               <input
                 v-model="form.phone"
                 name="phone"
@@ -175,7 +176,12 @@ async function submit() {
           </form>
           <p class="auth-switch">
             {{ registering ? '已经有账号？' : '还没有账号？' }}
-            <RouterLink :to="registering ? '/login' : '/register'">
+            <RouterLink
+              :to="{
+                name: registering ? 'login' : 'register',
+                query: route.query.redirect ? { redirect: redirectAfterAuth() } : {},
+              }"
+            >
               {{ registering ? '返回登录' : '立即注册' }}
             </RouterLink>
           </p>

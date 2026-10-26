@@ -1,5 +1,41 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { loadSession, notify, session } from './composables/state.js'
+import { safeDestination } from './domain/auth.js'
+
+export const frontendBRoutes = [
+  {
+    path: '/my-tasks',
+    name: 'my-tasks',
+    component: () => import('./views/MyTasksView.vue'),
+    meta: { title: '我的任务' },
+  },
+  {
+    path: '/my-tasks/:taskId',
+    name: 'task-detail',
+    component: () => import('./views/TaskDetailView.vue'),
+    meta: { title: '任务详情' },
+  },
+  {
+    path: '/wallet',
+    component: () => import('./views/WalletView.vue'),
+    meta: { title: '钱包与流水' },
+  },
+  {
+    path: '/notifications',
+    component: () => import('./views/NotificationsView.vue'),
+    meta: { title: '通知中心' },
+  },
+  {
+    path: '/disputes',
+    component: () => import('./views/DisputesView.vue'),
+    meta: { title: '取消与申诉' },
+  },
+  {
+    path: '/admin',
+    component: () => import('./views/AdminView.vue'),
+    meta: { title: '管理工作台', admin: true },
+  },
+]
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -23,6 +59,7 @@ const router = createRouter({
       component: () => import('./views/TaskHallView.vue'),
       meta: { title: '任务大厅' },
     },
+    ...frontendBRoutes,
     {
       path: '/:pathMatch(.*)*',
       component: () => import('./views/NotFoundView.vue'),
@@ -31,18 +68,6 @@ const router = createRouter({
   ],
   scrollBehavior: () => ({ top: 0 }),
 })
-
-function safeDestination(value) {
-  if (
-    typeof value !== 'string' ||
-    !value.startsWith('/') ||
-    value.startsWith('//') ||
-    value.includes('\\')
-  )
-    return '/tasks'
-  if (['/login', '/register'].includes(value.split(/[?#]/, 1)[0])) return '/tasks'
-  return value
-}
 
 router.beforeEach(async (to) => {
   let currentUser = session.value
@@ -62,6 +87,10 @@ router.beforeEach(async (to) => {
     return true
   }
   if (!currentUser) return { name: 'login', query: { redirect: to.fullPath } }
+  if (to.meta.admin && currentUser.role !== 'ADMIN') {
+    notify('当前账号没有管理端访问权限。', 'error')
+    return '/my-tasks'
+  }
   return true
 })
 
