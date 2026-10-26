@@ -8,7 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.Map;
 import java.util.UUID;
 
-import edu.campus.taskplatform.common.error.GlobalExceptionHandler;
+import edu.campus.taskplatform.common.GlobalExceptionHandler;
 import edu.campus.taskplatform.dispute.appeal.AdminAppealController;
 import edu.campus.taskplatform.dispute.appeal.AppealController;
 import edu.campus.taskplatform.dispute.appeal.AppealRepository;

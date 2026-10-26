@@ -28,6 +28,10 @@ public final class ApiResponse<T> {
         return new ApiResponse<>(code.code(), message, null);
     }
 
+    public static ApiResponse<Void> error(String code, String message) {
+        return new ApiResponse<>(code, message, null);
+    }
+
     public String getCode() {
         return code;
     }
