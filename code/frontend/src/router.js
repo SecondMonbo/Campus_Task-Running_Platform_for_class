@@ -1,9 +1,14 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import MyTasksView from './views/MyTasksView.vue'
 import { loadSession, notify, session } from './composables/state.js'
+import { safeDestination } from './domain/auth.js'
 
 export const frontendBRoutes = [
-  { path: '/my-tasks', name: 'my-tasks', component: MyTasksView, meta: { title: '我的任务' } },
+  {
+    path: '/my-tasks',
+    name: 'my-tasks',
+    component: () => import('./views/MyTasksView.vue'),
+    meta: { title: '我的任务' },
+  },
   {
     path: '/my-tasks/:taskId',
     name: 'task-detail',
@@ -31,10 +36,29 @@ export const frontendBRoutes = [
     meta: { title: '管理工作台', admin: true },
   },
 ]
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/', redirect: '/my-tasks' },
+    { path: '/', redirect: '/tasks' },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('./views/AuthView.vue'),
+      meta: { title: '登录', authPage: true },
+    },
+    {
+      path: '/register',
+      name: 'register',
+      component: () => import('./views/AuthView.vue'),
+      meta: { title: '创建账号', authPage: true },
+    },
+    {
+      path: '/tasks',
+      name: 'tasks',
+      component: () => import('./views/TaskHallView.vue'),
+      meta: { title: '任务大厅' },
+    },
     ...frontendBRoutes,
     {
       path: '/:pathMatch(.*)*',
@@ -44,22 +68,34 @@ const router = createRouter({
   ],
   scrollBehavior: () => ({ top: 0 }),
 })
+
 router.beforeEach(async (to) => {
-  if (!to.meta.admin) return true
-  if (!session.value) {
+  let currentUser = session.value
+  if (!currentUser) {
     try {
-      await loadSession()
-    } catch {
-      return '/my-tasks'
+      currentUser = await loadSession()
+    } catch (error) {
+      if (!to.meta.authPage) {
+        notify(error.message, 'error')
+        return { name: 'login', query: { redirect: to.fullPath } }
+      }
     }
   }
-  if (session.value.role !== 'ADMIN') {
+
+  if (to.meta.authPage) {
+    if (currentUser) return safeDestination(to.query.redirect)
+    return true
+  }
+  if (!currentUser) return { name: 'login', query: { redirect: to.fullPath } }
+  if (to.meta.admin && currentUser.role !== 'ADMIN') {
     notify('当前账号没有管理端访问权限。', 'error')
     return '/my-tasks'
   }
   return true
 })
+
 router.afterEach((to) => {
   document.title = `${to.meta.title || '校园跑腿'} · 校园跑腿平台`
 })
+
 export default router

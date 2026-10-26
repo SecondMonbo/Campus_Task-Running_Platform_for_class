@@ -12,6 +12,9 @@ async function page(path, query, signal) {
 }
 
 export const api = {
+  register: (body) => post('/auth/register', body),
+  login: (body) => post('/auth/login', body),
+  logout: () => post('/auth/logout'),
   me: async () => {
     const user = await get('/auth/me')
     if (!user?.userId || !['USER', 'ADMIN'].includes(user.role))

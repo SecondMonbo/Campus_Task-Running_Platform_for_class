@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { api } from '../api/index.js'
+import { createSessionStore } from './session.js'
 
-export const session = ref(null)
 export const revision = ref(0)
 export const toasts = ref([])
 let toastId = 0
@@ -16,20 +16,10 @@ export function notify(message, tone = 'success') {
 export const changed = () => {
   revision.value += 1
 }
-let sessionPromise
-export async function loadSession() {
-  if (session.value) return session.value
-  sessionPromise ??= api
-    .me()
-    .then((user) => {
-      session.value = user
-      return user
-    })
-    .finally(() => {
-      sessionPromise = undefined
-    })
-  return sessionPromise
-}
+export const { session, setSession, clearSession, loadSession } = createSessionStore(
+  api.me,
+  changed,
+)
 
 export function useResource(loader, sources = []) {
   const data = ref(null)

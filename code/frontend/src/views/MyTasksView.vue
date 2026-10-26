@@ -1,16 +1,14 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { api } from '../api/index.js'
 import { revision, usePaged, useResource } from '../composables/state.js'
 import { formatDate, formatNumber, taskStatuses } from '../domain/tasks.js'
 import AppIcon from '../components/AppIcon.vue'
-import AppModal from '../components/AppModal.vue'
 import AsyncPanel from '../components/AsyncPanel.vue'
 import PageControls from '../components/PageControls.vue'
 import TaskActions from '../components/TaskActions.vue'
 
-const router = useRouter()
 const route = useRoute()
 const role = ref(route.query.as === 'publisher' ? 'publisher' : 'runner')
 const status = ref('')
@@ -21,8 +19,6 @@ watch(
   },
   { flush: 'sync' },
 )
-const lookup = ref(false)
-const taskId = ref('')
 const { items, total, loading, error, page, size, reload } = usePaged(
   (pagination, signal) =>
     api.myTasks({ ...pagination, as: role.value, status: status.value }, signal),
@@ -65,11 +61,6 @@ function refresh() {
   reload()
   counts.reload()
 }
-function viewTask() {
-  if (!taskId.value.trim()) return
-  lookup.value = false
-  router.push({ name: 'task-detail', params: { taskId: taskId.value.trim() } })
-}
 </script>
 
 <template>
@@ -88,10 +79,10 @@ function viewTask() {
           <AppIcon name="refresh" :size="16" />
           刷新
         </button>
-        <button class="button primary" @click="lookup = true">
+        <RouterLink to="/tasks" class="button primary">
           <AppIcon name="plus" :size="17" />
           接取任务
-        </button>
+        </RouterLink>
       </div>
     </div>
     <div class="stats-grid">
@@ -211,18 +202,5 @@ function viewTask() {
       <AppIcon name="shield" :size="16" />
       送达后由发布者手动验收，任务完成后报酬自动结算。
     </div>
-    <AppModal v-if="lookup" title="按编号查看任务" @close="lookup = false">
-      <form class="modal-body" @submit.prevent="viewTask">
-        <p class="muted">输入任务编号，核对详情后即可接取符合条件的任务。</p>
-        <label class="field">
-          任务编号
-          <input v-model="taskId" required maxlength="100" placeholder="输入任务编号" />
-        </label>
-        <footer class="modal-footer">
-          <button type="button" class="button secondary" @click="lookup = false">返回</button>
-          <button class="button primary">查看任务</button>
-        </footer>
-      </form>
-    </AppModal>
   </section>
 </template>

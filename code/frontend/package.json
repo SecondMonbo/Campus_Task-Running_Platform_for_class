@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:demo": "vite --mode demo",
     "dev:apifox": "vite --mode apifox",
     "build": "vite build",
     "preview": "vite preview",

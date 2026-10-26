@@ -1,4 +1,5 @@
 async function verifyFrontendB(page) {
+  const baseUrl = new URL(page.url()).origin
   await page.unrouteAll({ behavior: 'wait' })
   // Fixed contract fixtures are intercepted only in this browser verification session.
   // Application code always calls the configured API; no fixture fallback is shipped.
@@ -310,7 +311,7 @@ async function verifyFrontendB(page) {
     return respond(null, 404, 'NOT_FOUND', path)
   })
   const go = async (path) => {
-    await page.goto(`http://127.0.0.1:5173${path}`)
+    await page.goto(`${baseUrl}${path}`)
     await page.getByRole('heading', { level: 1 }).waitFor()
   }
   const settle = async () => {
@@ -556,7 +557,9 @@ async function verifyFrontendB(page) {
 
   expireAuth = true
   await page.reload()
-  await page.getByRole('heading', { name: '请先登录', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '欢迎回来', exact: true }).waitFor()
+  check(new URL(page.url()).pathname === '/login', '会话失效应复用 A 的登录路由')
+  check(new URL(page.url()).searchParams.get('redirect') === '/wallet', '会话失效应保留返回路径')
   check(!(await page.locator('table').count()), '登录失效后不应显示业务记录')
   expireAuth = false
   await page.setViewportSize({ width: 1366, height: 900 })
