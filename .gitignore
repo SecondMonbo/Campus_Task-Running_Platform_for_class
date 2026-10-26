@@ -1,5 +1,10 @@
-# Claude Code 本地上下文说明（仅本地使用，不入库）
-CLAUDE.md
+# 团队共享忽略规则（个人规则请写入 .git/info/exclude）
 
-# 本地绘图源文件（仅本地留存，不入库）
-image_local/
+# 构建产物
+target/
+*.class
+*.log
+
+# 依赖与编辑器
+node_modules/
+.idea/
