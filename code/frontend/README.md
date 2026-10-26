@@ -15,6 +15,10 @@ npm.cmd run dev:demo
 
 Mock 账号和任务保存在当前服务进程内；停止或重启服务后会重置。此模式用于页面演示，不保存真实业务数据。
 
+## 连接真实后端
+
+运行 `npm.cmd run dev` 可启动常规开发模式。Vite 会把 `/api` 和 `/actuator` 请求代理到 `http://localhost:8080`。后端与数据库的启动说明见 [`../README.md`](../README.md)。
+
 ## OpenAPI 字段
 
-字段与状态定义见 `../development_doc/openapi.yaml`。本地 Mock 可通过 `npm.cmd run dev:demo` 独立运行；连接后端时运行 `npm.cmd run dev`，默认代理到 `http://localhost:8080`。
+字段与状态定义以 `../development_doc/openapi.yaml` 为准。完成依赖安装后，可运行 `npm.cmd run build` 检查生产构建，再用 `npm.cmd run preview` 预览构建结果。

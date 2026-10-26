@@ -1,10 +1,11 @@
 :root {
-  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-family: 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   color: #243b36;
   background: #f6f8f7;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   --green: #24735a;
   --deep-green: #193e34;
   --muted: #66786d;
@@ -16,6 +17,7 @@
 body {
   margin: 0;
   min-width: 320px;
+  min-height: 100vh;
 }
 a {
   color: inherit;
