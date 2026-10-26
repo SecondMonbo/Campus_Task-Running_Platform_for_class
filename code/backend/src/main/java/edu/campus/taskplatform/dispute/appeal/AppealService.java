@@ -79,6 +79,9 @@ public class AppealService {
 
 	/**
 	 * 管理员裁决：驳回不划转；支持或部分支持时校验被申诉方可用余额后划转。
+	 *
+	 * <p>划转要求账务端口返回 1—2 条关联流水 ID。返回 {@code null} 或空列表时视为账务异常，
+	 * 抛出 500 {@code INTERNAL_ERROR} 并使事务回滚，申诉保持 {@code PENDING}。</p>
 	 */
 	@Transactional
 	public AppealDto decide(UUID appealId, AppealDecisionRequest command) {
@@ -111,11 +114,14 @@ public class AppealService {
 			}
 			transactionIds = ledgerPort.transferAvailable(appeal.getTaskId(), appeal.getAppealId(),
 					appeal.getRespondentId(), appeal.getAppellantId(), amount);
-			if (transactionIds == null) {
-				transactionIds = List.of();
+			// 划转成功必须留下可核对的流水：null（实现漏返回）和空列表（未产生任何流水）
+			// 都不是合法的成功结果。此时申诉不能标记为已处理，抛异常让整个事务回滚，
+			// 包括账务端口在同一事务内写入的余额与流水。
+			if (transactionIds == null || transactionIds.isEmpty()) {
+				throw new ApiException(ErrorCode.INTERNAL_ERROR, "账务服务未返回有效流水，申诉裁决已回滚");
 			}
 			if (transactionIds.size() > 2) {
-				throw new IllegalStateException("申诉划转最多产生两条关联流水");
+				throw new ApiException(ErrorCode.INTERNAL_ERROR, "申诉划转最多产生两条关联流水");
 			}
 		}
 

@@ -11,6 +11,7 @@ import edu.campus.taskplatform.common.api.PageResult;
 import edu.campus.taskplatform.common.error.ApiException;
 import edu.campus.taskplatform.common.error.ErrorCode;
 import edu.campus.taskplatform.dispute.appeal.AppealDto;
+import edu.campus.taskplatform.dispute.appeal.AppealEntity;
 import edu.campus.taskplatform.dispute.appeal.AppealReason;
 import edu.campus.taskplatform.dispute.appeal.AppealRepository;
 import edu.campus.taskplatform.dispute.appeal.AppealResult;
@@ -201,6 +202,48 @@ class AppealServiceTest {
 	}
 
 	@Test
+	void decide_nullTransferIds_rollsBackAndAppealStaysPending() {
+		givenTask(TaskStatus.COMPLETED);
+		UUID appealId = givenAppeal(publisher);
+		ledger.setBalance(runner, 15);
+		ledger.overrideNextTransfer(InMemoryLedgerPort.TransferOutcome.NULL_IDS);
+		currentUser.signInAsAdmin(admin);
+
+		assertApiError(() -> service.decide(appealId,
+				new AppealDecisionRequest(AppealResult.SUPPORTED, 10, "账务漏返回流水")), ErrorCode.INTERNAL_ERROR);
+
+		assertAppealRemainsPending(appealId);
+	}
+
+	@Test
+	void decide_emptyTransferIds_rollsBackAndAppealStaysPending() {
+		givenTask(TaskStatus.COMPLETED);
+		UUID appealId = givenAppeal(publisher);
+		ledger.setBalance(runner, 15);
+		ledger.overrideNextTransfer(InMemoryLedgerPort.TransferOutcome.EMPTY_IDS);
+		currentUser.signInAsAdmin(admin);
+
+		assertApiError(() -> service.decide(appealId,
+				new AppealDecisionRequest(AppealResult.SUPPORTED, 10, "账务未产生流水")), ErrorCode.INTERNAL_ERROR);
+
+		assertAppealRemainsPending(appealId);
+	}
+
+	@Test
+	void decide_tooManyTransferIds_rollsBackAndAppealStaysPending() {
+		givenTask(TaskStatus.COMPLETED);
+		UUID appealId = givenAppeal(publisher);
+		ledger.setBalance(runner, 15);
+		ledger.overrideNextTransfer(InMemoryLedgerPort.TransferOutcome.TOO_MANY_IDS);
+		currentUser.signInAsAdmin(admin);
+
+		assertApiError(() -> service.decide(appealId,
+				new AppealDecisionRequest(AppealResult.SUPPORTED, 10, "流水条数非法")), ErrorCode.INTERNAL_ERROR);
+
+		assertAppealRemainsPending(appealId);
+	}
+
+	@Test
 	void decide_rejectsAmountOutsideResultSemantics() {
 		givenTask(TaskStatus.COMPLETED);
 		UUID appealId = givenAppeal(publisher);
@@ -287,6 +330,19 @@ class AppealServiceTest {
 		currentUser.signInAsUser(appellantId);
 		return UUID.fromString(service.create(taskId,
 				new CreateAppealRequest(AppealReason.OTHER, "申诉说明")).appealId());
+	}
+
+	/**
+	 * 重新查询申诉，确认裁决失败后没有留下任何“已处理”痕迹。
+	 * 不访问懒加载的 transactionIds，避免在事务外触发 LazyInitializationException。
+	 */
+	private void assertAppealRemainsPending(UUID appealId) {
+		AppealEntity reloaded = repository.findById(appealId).orElseThrow();
+		assertEquals(AppealStatus.PENDING, reloaded.getStatus());
+		assertNull(reloaded.getResult());
+		assertEquals(0, reloaded.getTransferAmount());
+		assertNull(reloaded.getDecidedAt());
+		assertNull(reloaded.getDecidedBy());
 	}
 
 	private void assertApiError(Executable executable, ErrorCode expected) {

@@ -79,7 +79,9 @@ PENDING --裁决--> DECIDED   任务保持 COMPLETED，原始结算流水不变�
 - **裁决**：仅管理员；仅 `PENDING` 申诉。
   - `REJECTED`：`transferAmount` 必须为 0，不产生流水。
   - `SUPPORTED` / `PARTIALLY_SUPPORTED`：`transferAmount > 0` 且不得超过被申诉方当前可用余额，
-    从被申诉方可用余额划转给申诉方，返回最多两条关联流水 ID。
+    从被申诉方可用余额划转给申诉方，账务端口必须返回 1—2 条关联流水 ID。
+    **空列表不是合法的成功结果**：返回 `null` 或空列表都视为账务异常，接口返回 500 `INTERNAL_ERROR`，
+    事务整体回滚，申诉保持 `PENDING`，不会被标记为已处理。
 - **幂等**：申诉行在事务内加锁，重复裁决返回 409 `APPEAL_ALREADY_DECIDED`。
 
 ### 4.3 错误码
@@ -97,6 +99,7 @@ PENDING --裁决--> DECIDED   任务保持 COMPLETED，原始结算流水不变�
 | 409 | `APPEAL_ALREADY_DECIDED` | 重复裁决 |
 | 409 | `INSUFFICIENT_BALANCE` | 被申诉方可用余额不足 |
 | 500 | `INTEGRATION_NOT_READY` | 公共能力尚未接入（占位实现） |
+| 500 | `INTERNAL_ERROR` | 账务端口在申诉划转时返回 `null`、空列表或超过两条流水，裁决事务回滚 |
 
 ## 5. 端口与集成方式
 
@@ -124,7 +127,9 @@ public interface LedgerPort {
 1. 三个端口的实现都必须加入调用方已有事务，不自行提交；账务余额与流水必须同事务。
 2. `findTaskForUpdate` 必须对任务行加锁，防止“取消裁决”与“确认完成”并发时状态错乱。
 3. `TaskParticipationPort.cancelTask` 应在状态不符时抛出 `TASK_STATE_CONFLICT`（409）。
-4. 注册真实 Bean 后，`DisputeIntegrationFallbackConfiguration` 中的占位 Bean 因 `@ConditionalOnMissingBean`
+4. `transferAvailable` 必须返回 1—2 条真实流水 ID，不得返回 `null` 或空列表；否则申诉裁决按
+   500 `INTERNAL_ERROR` 回滚，申诉保持 `PENDING`。
+5. 注册真实 Bean 后，`DisputeIntegrationFallbackConfiguration` 中的占位 Bean 因 `@ConditionalOnMissingBean`
    自动失效，无需改业务代码；集成完成后可删除该配置类与
    `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`。
 

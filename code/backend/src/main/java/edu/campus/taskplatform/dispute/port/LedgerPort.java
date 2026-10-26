@@ -24,7 +24,11 @@ public interface LedgerPort {
 	/**
 	 * 从被申诉方可用余额向申诉方划转裁决金额，并写入双方关联流水。
 	 *
-	 * @return 两条流水的 ID（出账、入账），顺序稳定，供申诉记录回填
+	 * <p>调用方会把返回值作为“划转已留痕”的依据写入申诉记录。实现必须返回 1—2 条真实流水 ID；
+	 * <strong>不得返回 {@code null} 或空列表</strong>——那表示划转没有产生可核对的流水，调用方会按
+	 * 账务异常处理并回滚整个事务，包括本方法在同一事务内已写入的余额与流水。</p>
+	 *
+	 * @return 非空的流水 ID 列表（出账、入账），顺序稳定，供申诉记录回填
 	 * @throws edu.campus.taskplatform.common.error.ApiException 可用余额不足时抛出
 	 *         {@code INSUFFICIENT_BALANCE}（409）
 	 */
