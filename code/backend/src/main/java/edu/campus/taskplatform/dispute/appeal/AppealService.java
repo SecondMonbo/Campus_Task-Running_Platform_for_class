@@ -51,7 +51,7 @@ public class AppealService {
 	 * 提交申诉：仅任务参与者、仅已完成任务、每位参与者对同一任务最多一次。
 	 */
 	@Transactional
-	public AppealDto create(UUID taskId, CreateAppealRequest command) {
+	public AppealDto create(String taskId, CreateAppealRequest command) {
 		AuthenticatedUser user = currentUserPort.requireUser();
 		TaskSnapshot task = taskPort.findTaskForUpdate(taskId)
 				.orElseThrow(() -> new ApiException(ErrorCode.TASK_NOT_FOUND));
@@ -61,7 +61,7 @@ public class AppealService {
 		if (task.status() != TaskStatus.COMPLETED) {
 			throw new ApiException(ErrorCode.TASK_STATE_CONFLICT, "仅已完成任务可以提交申诉");
 		}
-		UUID respondentId = task.counterpartOf(user.userId())
+		Long respondentId = task.counterpartOf(user.userId())
 				.orElseThrow(() -> new ApiException(ErrorCode.TASK_STATE_CONFLICT, "任务缺少另一位参与者"));
 		if (repository.existsByTaskIdAndAppellantId(taskId, user.userId())) {
 			throw new ApiException(ErrorCode.APPEAL_ALREADY_EXISTS);
@@ -108,7 +108,7 @@ public class AppealService {
 			if (amount <= 0) {
 				throw new ApiException(ErrorCode.VALIDATION_ERROR, "支持或部分支持申诉时 transferAmount 必须大于 0");
 			}
-			int available = ledgerPort.availableBalance(appeal.getRespondentId());
+			long available = ledgerPort.availableBalance(appeal.getRespondentId());
 			if (amount > available) {
 				throw new ApiException(ErrorCode.INSUFFICIENT_BALANCE);
 			}

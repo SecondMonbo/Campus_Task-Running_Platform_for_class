@@ -59,11 +59,11 @@ class AppealServiceTest {
 	@Autowired
 	InMemoryLedgerPort ledger;
 
-	UUID publisher;
-	UUID runner;
-	UUID outsider;
-	UUID admin;
-	UUID taskId;
+	Long publisher;
+	Long runner;
+	Long outsider;
+	Long admin;
+	String taskId;
 
 	@BeforeEach
 	void setUp() {
@@ -71,11 +71,11 @@ class AppealServiceTest {
 		taskPort.reset();
 		ledger.reset();
 		currentUser.signOut();
-		publisher = UUID.randomUUID();
-		runner = UUID.randomUUID();
-		outsider = UUID.randomUUID();
-		admin = UUID.randomUUID();
-		taskId = UUID.randomUUID();
+		publisher = 101L;
+		runner = 102L;
+		outsider = 103L;
+		admin = 104L;
+		taskId = UUID.randomUUID().toString();
 	}
 
 	@Test
@@ -147,7 +147,8 @@ class AppealServiceTest {
 				ErrorCode.UNAUTHORIZED);
 
 		currentUser.signInAsUser(publisher);
-		assertApiError(() -> service.create(UUID.randomUUID(), new CreateAppealRequest(AppealReason.OTHER, "不存在")),
+		assertApiError(() -> service.create(UUID.randomUUID().toString(),
+				new CreateAppealRequest(AppealReason.OTHER, "不存在")),
 				ErrorCode.TASK_NOT_FOUND);
 	}
 
@@ -326,7 +327,7 @@ class AppealServiceTest {
 		taskPort.put(new TaskSnapshot(taskId, publisher, runner, status, REWARD));
 	}
 
-	private UUID givenAppeal(UUID appellantId) {
+	private UUID givenAppeal(Long appellantId) {
 		currentUser.signInAsUser(appellantId);
 		return UUID.fromString(service.create(taskId,
 				new CreateAppealRequest(AppealReason.OTHER, "申诉说明")).appealId());

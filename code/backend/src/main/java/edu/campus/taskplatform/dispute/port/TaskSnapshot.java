@@ -1,7 +1,6 @@
 package edu.campus.taskplatform.dispute.port;
 
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * 取消/申诉模块需要读取的任务快照。该结构只读，任务状态的写入一律委托给任务模块。
@@ -12,16 +11,16 @@ import java.util.UUID;
  * @param status 当前任务状态
  * @param reward 发布时已冻结的报酬（虚拟币整数）
  */
-public record TaskSnapshot(UUID taskId, UUID publisherId, UUID runnerId, TaskStatus status, int reward) {
+public record TaskSnapshot(String taskId, Long publisherId, Long runnerId, TaskStatus status, int reward) {
 
-	public boolean isParticipant(UUID userId) {
+	public boolean isParticipant(Long userId) {
 		return userId != null && (userId.equals(publisherId) || userId.equals(runnerId));
 	}
 
 	/**
 	 * 返回另一位任务参与者；发起人不是参与者或任务尚无跑腿员时返回空。
 	 */
-	public Optional<UUID> counterpartOf(UUID userId) {
+	public Optional<Long> counterpartOf(Long userId) {
 		if (userId == null) {
 			return Optional.empty();
 		}

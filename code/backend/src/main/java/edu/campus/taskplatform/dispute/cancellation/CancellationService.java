@@ -61,7 +61,7 @@ public class CancellationService {
 	 * 发起取消申请：仅任务参与者、仅进行中或待验收任务、同一任务同时只允许一条活动申请。
 	 */
 	@Transactional
-	public CancellationRequestDto create(UUID taskId, CreateCancellationRequest command) {
+	public CancellationRequestDto create(String taskId, CreateCancellationRequest command) {
 		AuthenticatedUser user = currentUserPort.requireUser();
 		TaskSnapshot task = taskPort.findTaskForUpdate(taskId)
 				.orElseThrow(() -> new ApiException(ErrorCode.TASK_NOT_FOUND));
@@ -97,7 +97,7 @@ public class CancellationService {
 		}
 		TaskSnapshot task = taskPort.findTaskForUpdate(request.getTaskId())
 				.orElseThrow(() -> new ApiException(ErrorCode.TASK_NOT_FOUND));
-		UUID counterpartId = task.counterpartOf(request.getRequesterId())
+		Long counterpartId = task.counterpartOf(request.getRequesterId())
 				.orElseThrow(() -> new ApiException(ErrorCode.TASK_STATE_CONFLICT, "任务尚无可应答的另一方"));
 		if (!counterpartId.equals(user.userId())) {
 			throw new ApiException(ErrorCode.FORBIDDEN, "仅被申请方可以应答取消申请");

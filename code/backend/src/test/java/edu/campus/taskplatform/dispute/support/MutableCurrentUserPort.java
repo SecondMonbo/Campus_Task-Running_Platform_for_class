@@ -1,7 +1,6 @@
 package edu.campus.taskplatform.dispute.support;
 
 import java.util.Optional;
-import java.util.UUID;
 
 import edu.campus.taskplatform.dispute.port.AuthenticatedUser;
 import edu.campus.taskplatform.dispute.port.CurrentUserPort;
@@ -19,15 +18,15 @@ public class MutableCurrentUserPort implements CurrentUserPort {
 		return Optional.ofNullable(current);
 	}
 
-	public void signIn(UUID userId, UserRole role) {
+	public void signIn(Long userId, UserRole role) {
 		this.current = new AuthenticatedUser(userId, role);
 	}
 
-	public void signInAsUser(UUID userId) {
+	public void signInAsUser(Long userId) {
 		signIn(userId, UserRole.USER);
 	}
 
-	public void signInAsAdmin(UUID userId) {
+	public void signInAsAdmin(Long userId) {
 		signIn(userId, UserRole.ADMIN);
 	}
 

@@ -25,7 +25,7 @@ public record AppealDto(
 	public static AppealDto from(AppealEntity entity) {
 		return new AppealDto(
 				entity.getAppealId().toString(),
-				entity.getTaskId().toString(),
+				entity.getTaskId(),
 				entity.getAppellantId().toString(),
 				entity.getRespondentId().toString(),
 				entity.getReason(),

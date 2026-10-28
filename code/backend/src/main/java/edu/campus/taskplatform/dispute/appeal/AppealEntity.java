@@ -32,14 +32,14 @@ public class AppealEntity {
 	@Column(name = "appeal_id", nullable = false, updatable = false)
 	private UUID appealId;
 
-	@Column(name = "task_id", nullable = false, updatable = false)
-	private UUID taskId;
+	@Column(name = "task_id", nullable = false, updatable = false, length = 36)
+	private String taskId;
 
 	@Column(name = "appellant_id", nullable = false, updatable = false)
-	private UUID appellantId;
+	private Long appellantId;
 
 	@Column(name = "respondent_id", nullable = false, updatable = false)
-	private UUID respondentId;
+	private Long respondentId;
 
 	@Enumerated(EnumType.STRING)
 	@Column(name = "reason", nullable = false, length = 32)
@@ -69,7 +69,7 @@ public class AppealEntity {
 	private List<UUID> transactionIds = new ArrayList<>();
 
 	@Column(name = "decided_by")
-	private UUID decidedBy;
+	private Long decidedBy;
 
 	@Column(name = "decided_at")
 	private Instant decidedAt;
@@ -84,7 +84,7 @@ public class AppealEntity {
 		// JPA
 	}
 
-	private AppealEntity(UUID appealId, UUID taskId, UUID appellantId, UUID respondentId,
+	private AppealEntity(UUID appealId, String taskId, Long appellantId, Long respondentId,
 			AppealReason reason, String description) {
 		this.appealId = appealId;
 		this.taskId = taskId;
@@ -96,7 +96,7 @@ public class AppealEntity {
 		this.transferAmount = 0;
 	}
 
-	public static AppealEntity create(UUID taskId, UUID appellantId, UUID respondentId,
+	public static AppealEntity create(String taskId, Long appellantId, Long respondentId,
 			AppealReason reason, String description) {
 		return new AppealEntity(UUID.randomUUID(), taskId, appellantId, respondentId, reason, description);
 	}
@@ -116,7 +116,7 @@ public class AppealEntity {
 	/**
 	 * 记录管理员裁决结果。驳回时金额固定为 0 且不产生流水。
 	 */
-	public void decide(UUID adminId, Instant now, AppealResult result, int transferAmount,
+	public void decide(Long adminId, Instant now, AppealResult result, int transferAmount,
 			String decisionNote, List<UUID> transactionIds) {
 		if (this.status != AppealStatus.PENDING) {
 			throw new IllegalStateException("申诉已裁决");
@@ -135,15 +135,15 @@ public class AppealEntity {
 		return appealId;
 	}
 
-	public UUID getTaskId() {
+	public String getTaskId() {
 		return taskId;
 	}
 
-	public UUID getAppellantId() {
+	public Long getAppellantId() {
 		return appellantId;
 	}
 
-	public UUID getRespondentId() {
+	public Long getRespondentId() {
 		return respondentId;
 	}
 
@@ -175,7 +175,7 @@ public class AppealEntity {
 		return List.copyOf(transactionIds);
 	}
 
-	public UUID getDecidedBy() {
+	public Long getDecidedBy() {
 		return decidedBy;
 	}
 

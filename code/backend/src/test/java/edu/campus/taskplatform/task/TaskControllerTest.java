@@ -1,6 +1,8 @@
 package edu.campus.taskplatform.task;
 
-import edu.campus.taskplatform.accounting.DemoAccountingService;
+import edu.campus.taskplatform.accounting.WalletAccount;
+import edu.campus.taskplatform.accounting.WalletAccountRepository;
+import edu.campus.taskplatform.accounting.WalletTransactionRepository;
 import edu.campus.taskplatform.auth.CurrentUser;
 import edu.campus.taskplatform.auth.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +43,10 @@ class TaskControllerTest {
     MockMvc mockMvc;
 
     @Autowired
-    DemoAccountingService accounting;
+    WalletAccountRepository walletAccountRepository;
+
+    @Autowired
+    WalletTransactionRepository walletTransactionRepository;
 
     @TestConfiguration
     static class StubCurrentUser {
@@ -54,8 +59,9 @@ class TaskControllerTest {
 
     @BeforeEach
     void setUp() {
-        accounting.reset();
-        accounting.deposit(1L, 5000);
+        walletTransactionRepository.deleteAll();
+        walletAccountRepository.deleteAll();
+        walletAccountRepository.save(new WalletAccount(1L, 5000, 0));
     }
 
     @Test
@@ -123,6 +129,24 @@ class TaskControllerTest {
                 .andExpect(jsonPath("$.code").value("OK"))
                 .andExpect(jsonPath("$.data.items").isArray())
                 .andExpect(jsonPath("$.data.total").value(0));
+    }
+
+    @Test
+    void wallet_endpoints_return_balance_and_paginated_transactions() throws Exception {
+        mockMvc.perform(get("/api/v1/wallet").with(user("u1").roles("USER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.availableBalance").value(5000))
+                .andExpect(jsonPath("$.data.frozenBalance").value(0));
+
+        createTaskAndGetId();
+        mockMvc.perform(get("/api/v1/wallet/transactions")
+                        .with(user("u1").roles("USER"))
+                        .param("type", "FREEZE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].userId").value("1"))
+                .andExpect(jsonPath("$.data.items[0].type").value("FREEZE"))
+                .andExpect(jsonPath("$.data.items[0].amount").value(-30))
+                .andExpect(jsonPath("$.data.total").value(1));
     }
 
     @Test

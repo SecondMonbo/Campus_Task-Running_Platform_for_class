@@ -19,7 +19,8 @@ public interface LedgerPort {
 	 * @param refundToPublisher 退回发布者可用余额的金额，不小于 0
 	 * @param payToRunner 计入跑腿员可用余额的金额，不小于 0
 	 */
-	void settleFrozenReward(UUID taskId, UUID publisherId, UUID runnerId, int refundToPublisher, int payToRunner);
+	void settleFrozenReward(String taskId, Long publisherId, Long runnerId,
+			long refundToPublisher, long payToRunner);
 
 	/**
 	 * 从被申诉方可用余额向申诉方划转裁决金额，并写入双方关联流水。
@@ -32,10 +33,11 @@ public interface LedgerPort {
 	 * @throws edu.campus.taskplatform.common.error.ApiException 可用余额不足时抛出
 	 *         {@code INSUFFICIENT_BALANCE}（409）
 	 */
-	List<UUID> transferAvailable(UUID taskId, UUID appealId, UUID fromUserId, UUID toUserId, int amount);
+	List<UUID> transferAvailable(String taskId, UUID appealId,
+			Long fromUserId, Long toUserId, long amount);
 
 	/**
 	 * 查询用户当前可用余额；账户不存在时视为 0。
 	 */
-	int availableBalance(UUID userId);
+	long availableBalance(Long userId);
 }

@@ -59,11 +59,11 @@ class CancellationServiceTest {
 	@Autowired
 	InMemoryLedgerPort ledger;
 
-	UUID publisher;
-	UUID runner;
-	UUID outsider;
-	UUID admin;
-	UUID taskId;
+	Long publisher;
+	Long runner;
+	Long outsider;
+	Long admin;
+	String taskId;
 
 	@BeforeEach
 	void setUp() {
@@ -71,11 +71,11 @@ class CancellationServiceTest {
 		taskPort.reset();
 		ledger.reset();
 		currentUser.signOut();
-		publisher = UUID.randomUUID();
-		runner = UUID.randomUUID();
-		outsider = UUID.randomUUID();
-		admin = UUID.randomUUID();
-		taskId = UUID.randomUUID();
+		publisher = 101L;
+		runner = 102L;
+		outsider = 103L;
+		admin = 104L;
+		taskId = UUID.randomUUID().toString();
 	}
 
 	@Test
@@ -86,7 +86,7 @@ class CancellationServiceTest {
 		CancellationRequestDto dto = service.create(taskId, new CreateCancellationRequest("时间冲突"));
 
 		assertEquals(CancellationStatus.PENDING_RESPONSE, dto.status());
-		assertEquals(taskId.toString(), dto.taskId());
+		assertEquals(taskId, dto.taskId());
 		assertEquals(publisher.toString(), dto.requesterId());
 		assertEquals("时间冲突", dto.reason());
 		assertEquals(0, dto.refundAmount());
@@ -145,7 +145,7 @@ class CancellationServiceTest {
 	void create_unknownTaskReturnsNotFound() {
 		currentUser.signInAsUser(publisher);
 
-		assertApiError(() -> service.create(UUID.randomUUID(), new CreateCancellationRequest("不存在")),
+		assertApiError(() -> service.create(UUID.randomUUID().toString(), new CreateCancellationRequest("不存在")),
 				ErrorCode.TASK_NOT_FOUND);
 	}
 
@@ -330,7 +330,7 @@ class CancellationServiceTest {
 		givenTask(TaskStatus.IN_PROGRESS);
 		givenPendingAdminRequest();
 
-		UUID secondTask = UUID.randomUUID();
+		String secondTask = UUID.randomUUID().toString();
 		taskId = secondTask;
 		givenTask(TaskStatus.IN_PROGRESS);
 		givenPendingRequest(publisher);
@@ -359,7 +359,7 @@ class CancellationServiceTest {
 		taskPort.put(new TaskSnapshot(taskId, publisher, runner, status, REWARD));
 	}
 
-	private UUID givenPendingRequest(UUID requesterId) {
+	private UUID givenPendingRequest(Long requesterId) {
 		currentUser.signInAsUser(requesterId);
 		return UUID.fromString(service.create(taskId, new CreateCancellationRequest("取消原因")).requestId());
 	}
@@ -368,8 +368,8 @@ class CancellationServiceTest {
 	 * 走完“发起 → 被申请方拒绝”，得到一条待管理员处理的申请。
 	 */
 	private UUID givenPendingAdminRequest() {
-		UUID requester = publisher;
-		UUID responder = runner;
+		Long requester = publisher;
+		Long responder = runner;
 		UUID requestId = givenPendingRequest(requester);
 		currentUser.signInAsUser(responder);
 		service.respond(requestId, new CancellationResponseRequest(CancellationDecision.REJECT, "拒绝"));

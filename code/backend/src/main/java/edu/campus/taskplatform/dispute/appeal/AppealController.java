@@ -30,7 +30,7 @@ public class AppealController {
 
 	@PostMapping("/tasks/{taskId}/appeals")
 	@ResponseStatus(HttpStatus.CREATED)
-	public ApiResponse<AppealDto> create(@PathVariable UUID taskId,
+	public ApiResponse<AppealDto> create(@PathVariable String taskId,
 			@Valid @RequestBody CreateAppealRequest request) {
 		return ApiResponse.ok(appealService.create(taskId, request));
 	}

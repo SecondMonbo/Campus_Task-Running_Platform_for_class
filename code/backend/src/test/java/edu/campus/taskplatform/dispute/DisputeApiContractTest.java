@@ -74,10 +74,10 @@ class DisputeApiContractTest {
 
 	MockMvc mockMvc;
 
-	UUID publisher;
-	UUID runner;
-	UUID admin;
-	UUID taskId;
+	Long publisher;
+	Long runner;
+	Long admin;
+	String taskId;
 
 	@BeforeEach
 	void setUp() {
@@ -87,10 +87,10 @@ class DisputeApiContractTest {
 		ledger.reset();
 		currentUser.signOut();
 
-		publisher = UUID.randomUUID();
-		runner = UUID.randomUUID();
-		admin = UUID.randomUUID();
-		taskId = UUID.randomUUID();
+		publisher = 101L;
+		runner = 102L;
+		admin = 103L;
+		taskId = UUID.randomUUID().toString();
 		taskPort.put(new TaskSnapshot(taskId, publisher, runner, TaskStatus.IN_PROGRESS, 30));
 
 		LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
@@ -114,7 +114,7 @@ class DisputeApiContractTest {
 				.andExpect(jsonPath("$.code").value("OK"))
 				.andExpect(jsonPath("$.message").value("success"))
 				.andExpect(jsonPath("$.data.requestId").isString())
-				.andExpect(jsonPath("$.data.taskId").value(taskId.toString()))
+				.andExpect(jsonPath("$.data.taskId").value(taskId))
 				.andExpect(jsonPath("$.data.requesterId").value(publisher.toString()))
 				.andExpect(jsonPath("$.data.status").value("PENDING_RESPONSE"))
 				.andExpect(jsonPath("$.data.refundAmount").value(0))
@@ -139,7 +139,7 @@ class DisputeApiContractTest {
 	}
 
 	@Test
-	void createCancellationRequest_mapsUnknownTaskTo404AndMalformedIdTo400() throws Exception {
+	void createCancellationRequest_mapsUnknownTaskTo404() throws Exception {
 		currentUser.signInAsUser(publisher);
 
 		mockMvc.perform(post("/api/v1/tasks/{taskId}/cancellation-requests", UUID.randomUUID())
@@ -152,8 +152,8 @@ class DisputeApiContractTest {
 		mockMvc.perform(post("/api/v1/tasks/{taskId}/cancellation-requests", "not-a-uuid")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(json("{\"reason\":\"格式错误\"}")))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.code").value("TASK_NOT_FOUND"));
 	}
 
 	@Test

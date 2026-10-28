@@ -18,7 +18,7 @@
 | 送达 | `POST /api/v1/tasks/{id}/delivery` | 仅跑腿员；进行中→待验收，记录送达时间 |
 | 确认完成 | `POST /api/v1/tasks/{id}/completion` | 仅发布者；待验收→已完成 + 结算给跑腿员，幂等 |
 | 评价 | `POST /api/v1/tasks/{id}/reviews` | 仅已完成；一条任务只能评价一次 |
-| 接入账务 | `AccountingService` 接口 + `DemoAccountingService` | 冻结/解冻/差额调整/结算，全部在任务事务内 |
+| 接入账务 | PostgreSQL 持久化的 `AccountingService` | 冻结/解冻/差额调整/结算，全部在任务事务内 |
 
 **状态机**：待接单 → 进行中 → 待验收 → 已完成；待接单 → 已取消（撤回）。已完成/已取消为终态。
 写操作一律**重新读库最新状态**再校验；不提供"任意改状态"接口；重复请求幂等（状态只前进一次、账务只动一次）。
@@ -29,17 +29,15 @@
 
 1. **当前用户从会话解析**：`SessionCurrentUserService` 从 Session 属性读取当前用户，属性名常量
    `SessionCurrentUserService.SESSION_ATTRIBUTE = "CURRENT_USER"`。
-   → **组长登录模块须在登录成功后写入**：`session.setAttribute("CURRENT_USER", currentUser)`。
-   否则任务接口会返回 401。（`CurrentUser` 是一个 record：`userId(Long) + role(String)`。）
+   `AuthSessionService` 在注册/登录成功后负责写入。（`CurrentUser` 是一个 record：`userId(Long) + role(String)`。）
 
-2. **账务服务接入**：任务模块只依赖 `AccountingService` 接口（`accounting` 包）。仓库暂用内存实现
-   `DemoAccountingService` 供联调/测试。
-   → **组长账务服务就绪后，实现该接口并以 `@Primary` 注册一个真实 Bean**（余额+流水，与任务同事务提交），
-   任务模块代码**零改动**。注意账务的 `taskId` 参数是字符串。
+2. **账务服务接入**：任务模块只依赖 `AccountingService` 接口（`accounting` 包）。当前默认实现
+   `PersistentAccountingService` 将余额和交易流水存储于 PostgreSQL，任务与账务共用数据库事务。
+   注册成功会在同一事务内创建钱包并发放 100 初始虚拟币；账务的 `taskId` 参数是字符串。
 
 3. **迁移脚本编号**：任务表脚本命名为 `V2__create_task_tables.sql`（避免占用 V1）。
    → **由组长统一合并迁移**，若组长 V1 已用于用户/账务表，V2 保持即可；如需重排编号请组长统一改。
-   表结构：`task`、`task_operation_log`、`task_review`（余额/流水/钱包表归组长，不在此脚本）。
+   表结构：`task`、`task_operation_log`、`task_review`；钱包账户与流水由后续账务迁移创建。
 
 > 另：送达通知属通知模块（后端B/组长）。当前送达仅写日志留痕，通知触发接口待通知模块就绪后接入（`TaskService.deliverTask` 内已注释预留）。
 
@@ -55,7 +53,7 @@ cd code/backend
 
 **生产/本地联调前置**（PostgreSQL）：
 - 建库：`campus_task_platform`；用户名/密码见 `application.yml`（默认 `campus_dev`，可用环境变量覆盖）。
-- `spring.jpa.hibernate.ddl-auto=validate` + Flyway 自动执行 `V2` 建表。
+- `spring.jpa.hibernate.ddl-auto=validate` + Flyway 自动执行任务、争议及钱包迁移。
 
 ---
 
@@ -64,7 +62,7 @@ cd code/backend
 **新增（main）**
 - `common/`：`ApiResponse`、`ErrorCode`、`PageResult`、`TaskException`、`GlobalExceptionHandler`
 - `auth/`：`CurrentUser`、`CurrentUserService`、`SessionCurrentUserService`
-- `accounting/`：`AccountingService`、`InsufficientBalanceException`、`DemoAccountingService`
+- `accounting/`：`AccountingService`、`PersistentAccountingService`、`WalletAccount`、`WalletTransaction`
 - `task/`：`TaskStatus`、`Task`、`TaskOperationLog`、`TaskReview`、`TaskRepository`、`TaskOperationLogRepository`、`TaskReviewRepository`、`TaskService`、`TaskController`
 - `task/dto/`：`TaskCreateRequest`、`TaskUpdateRequest`、`WithdrawalRequest`、`CreateReviewRequest`、`TaskView`
 - `db/migration/V2__create_task_tables.sql`

@@ -20,7 +20,7 @@ public record CancellationRequestDto(
 	public static CancellationRequestDto from(CancellationRequestEntity entity) {
 		return new CancellationRequestDto(
 				entity.getRequestId().toString(),
-				entity.getTaskId().toString(),
+				entity.getTaskId(),
 				entity.getRequesterId().toString(),
 				entity.getReason(),
 				entity.getResponseNote(),

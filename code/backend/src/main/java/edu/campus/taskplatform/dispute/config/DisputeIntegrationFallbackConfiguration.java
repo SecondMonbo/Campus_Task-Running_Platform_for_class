@@ -49,12 +49,12 @@ public class DisputeIntegrationFallbackConfiguration {
 		log.warn("Cancellation/Appeal module: TaskParticipationPort is not provided yet; task-dependent operations will fail");
 		return new TaskParticipationPort() {
 			@Override
-			public Optional<TaskSnapshot> findTaskForUpdate(UUID taskId) {
+			public Optional<TaskSnapshot> findTaskForUpdate(String taskId) {
 				throw notReady();
 			}
 
 			@Override
-			public void cancelTask(UUID taskId) {
+			public void cancelTask(String taskId) {
 				throw notReady();
 			}
 		};
@@ -66,19 +66,19 @@ public class DisputeIntegrationFallbackConfiguration {
 		log.warn("Cancellation/Appeal module: LedgerPort is not provided yet; settlement operations will fail");
 		return new LedgerPort() {
 			@Override
-			public void settleFrozenReward(UUID taskId, UUID publisherId, UUID runnerId,
-					int refundToPublisher, int payToRunner) {
+			public void settleFrozenReward(String taskId, Long publisherId, Long runnerId,
+					long refundToPublisher, long payToRunner) {
 				throw notReady();
 			}
 
 			@Override
-			public List<UUID> transferAvailable(UUID taskId, UUID appealId,
-					UUID fromUserId, UUID toUserId, int amount) {
+			public List<UUID> transferAvailable(String taskId, UUID appealId,
+					Long fromUserId, Long toUserId, long amount) {
 				throw notReady();
 			}
 
 			@Override
-			public int availableBalance(UUID userId) {
+			public long availableBalance(Long userId) {
 				throw notReady();
 			}
 		};

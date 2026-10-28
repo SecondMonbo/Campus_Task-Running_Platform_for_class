@@ -22,7 +22,7 @@ public interface CancellationRequestRepository extends JpaRepository<Cancellatio
 	@Query("select request from CancellationRequestEntity request where request.requestId = :requestId")
 	Optional<CancellationRequestEntity> findByIdForUpdate(@Param("requestId") UUID requestId);
 
-	boolean existsByTaskIdAndStatusIn(UUID taskId, Collection<CancellationStatus> statuses);
+	boolean existsByTaskIdAndStatusIn(String taskId, Collection<CancellationStatus> statuses);
 
 	Page<CancellationRequestEntity> findByStatus(CancellationStatus status, Pageable pageable);
 }

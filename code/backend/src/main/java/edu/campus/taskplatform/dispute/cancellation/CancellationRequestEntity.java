@@ -25,11 +25,11 @@ public class CancellationRequestEntity {
 	@Column(name = "request_id", nullable = false, updatable = false)
 	private UUID requestId;
 
-	@Column(name = "task_id", nullable = false, updatable = false)
-	private UUID taskId;
+	@Column(name = "task_id", nullable = false, updatable = false, length = 36)
+	private String taskId;
 
 	@Column(name = "requester_id", nullable = false, updatable = false)
-	private UUID requesterId;
+	private Long requesterId;
 
 	@Column(name = "reason", nullable = false, length = 200)
 	private String reason;
@@ -55,13 +55,13 @@ public class CancellationRequestEntity {
 	private int runnerAmount;
 
 	@Column(name = "responded_by")
-	private UUID respondedBy;
+	private Long respondedBy;
 
 	@Column(name = "responded_at")
 	private Instant respondedAt;
 
 	@Column(name = "arbitrated_by")
-	private UUID arbitratedBy;
+	private Long arbitratedBy;
 
 	@Column(name = "arbitrated_at")
 	private Instant arbitratedAt;
@@ -76,7 +76,7 @@ public class CancellationRequestEntity {
 		// JPA
 	}
 
-	private CancellationRequestEntity(UUID requestId, UUID taskId, UUID requesterId, String reason) {
+	private CancellationRequestEntity(UUID requestId, String taskId, Long requesterId, String reason) {
 		this.requestId = requestId;
 		this.taskId = taskId;
 		this.requesterId = requesterId;
@@ -86,7 +86,7 @@ public class CancellationRequestEntity {
 		this.runnerAmount = 0;
 	}
 
-	public static CancellationRequestEntity create(UUID taskId, UUID requesterId, String reason) {
+	public static CancellationRequestEntity create(String taskId, Long requesterId, String reason) {
 		return new CancellationRequestEntity(UUID.randomUUID(), taskId, requesterId, reason);
 	}
 
@@ -105,7 +105,7 @@ public class CancellationRequestEntity {
 	/**
 	 * 被申请方同意取消：申请直接生效，冻结报酬全额退回发布者。
 	 */
-	public void approve(UUID responderId, Instant now, int fullReward, String note) {
+	public void approve(Long responderId, Instant now, int fullReward, String note) {
 		requirePendingResponse();
 		this.status = CancellationStatus.APPROVED;
 		this.respondedBy = responderId;
@@ -118,7 +118,7 @@ public class CancellationRequestEntity {
 	/**
 	 * 被申请方拒绝：申请转入待管理员处理，任务与账务均不变化。
 	 */
-	public void reject(UUID responderId, Instant now, String note) {
+	public void reject(Long responderId, Instant now, String note) {
 		requirePendingResponse();
 		this.status = CancellationStatus.PENDING_ADMIN;
 		this.respondedBy = responderId;
@@ -129,7 +129,7 @@ public class CancellationRequestEntity {
 	/**
 	 * 管理员裁决。支持继续时金额必须为 0；取消类裁决由调用方校验金额拆分。
 	 */
-	public void arbitrate(UUID adminId, Instant now, CancellationRuling ruling, String detail,
+	public void arbitrate(Long adminId, Instant now, CancellationRuling ruling, String detail,
 			int refundAmount, int runnerAmount) {
 		if (this.status != CancellationStatus.PENDING_ADMIN) {
 			throw new IllegalStateException("只有待管理员处理的取消申请可以裁决");
@@ -153,11 +153,11 @@ public class CancellationRequestEntity {
 		return requestId;
 	}
 
-	public UUID getTaskId() {
+	public String getTaskId() {
 		return taskId;
 	}
 
-	public UUID getRequesterId() {
+	public Long getRequesterId() {
 		return requesterId;
 	}
 
@@ -189,7 +189,7 @@ public class CancellationRequestEntity {
 		return runnerAmount;
 	}
 
-	public UUID getRespondedBy() {
+	public Long getRespondedBy() {
 		return respondedBy;
 	}
 
@@ -197,7 +197,7 @@ public class CancellationRequestEntity {
 		return respondedAt;
 	}
 
-	public UUID getArbitratedBy() {
+	public Long getArbitratedBy() {
 		return arbitratedBy;
 	}
 

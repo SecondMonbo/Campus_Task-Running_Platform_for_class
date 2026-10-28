@@ -41,7 +41,7 @@ paths:
     post:
       tags: [Auth]
       summary: 注册普通用户
-      description: 写操作须携带 CSRF Token。请求中不得指定管理员角色。
+      description: 写操作须携带 CSRF Token。请求中不得指定管理员角色。注册成功后自动登录，并为新用户发放 100 虚拟币初始余额。
       operationId: register
       security: []
       parameters:
@@ -1277,9 +1277,11 @@ components:
       properties:
         username:
           type: string
+          maxLength: 50
         password:
           type: string
           format: password
+          maxLength: 128
 
     CsrfToken:
       type: object

@@ -17,7 +17,7 @@ import edu.campus.taskplatform.dispute.port.LedgerPort;
  */
 public class InMemoryLedgerPort implements LedgerPort {
 
-	private final Map<UUID, Integer> balances = new ConcurrentHashMap<>();
+	private final Map<Long, Long> balances = new ConcurrentHashMap<>();
 	private final List<Settlement> settlements = new CopyOnWriteArrayList<>();
 	private final AtomicReference<TransferOutcome> nextTransferOutcome =
 			new AtomicReference<>(TransferOutcome.NORMAL);
@@ -35,13 +35,14 @@ public class InMemoryLedgerPort implements LedgerPort {
 	}
 
 	@Override
-	public void settleFrozenReward(UUID taskId, UUID publisherId, UUID runnerId,
-			int refundToPublisher, int payToRunner) {
+	public void settleFrozenReward(String taskId, Long publisherId, Long runnerId,
+			long refundToPublisher, long payToRunner) {
 		settlements.add(new Settlement(taskId, publisherId, runnerId, refundToPublisher, payToRunner));
 	}
 
 	@Override
-	public List<UUID> transferAvailable(UUID taskId, UUID appealId, UUID fromUserId, UUID toUserId, int amount) {
+	public List<UUID> transferAvailable(String taskId, UUID appealId,
+			Long fromUserId, Long toUserId, long amount) {
 		TransferOutcome outcome = nextTransferOutcome.getAndSet(TransferOutcome.NORMAL);
 		switch (outcome) {
 			case NULL_IDS:
@@ -53,7 +54,7 @@ public class InMemoryLedgerPort implements LedgerPort {
 			default:
 				break;
 		}
-		int fromBalance = availableBalance(fromUserId);
+		long fromBalance = availableBalance(fromUserId);
 		if (fromBalance < amount) {
 			throw new ApiException(ErrorCode.INSUFFICIENT_BALANCE);
 		}
@@ -63,11 +64,11 @@ public class InMemoryLedgerPort implements LedgerPort {
 	}
 
 	@Override
-	public int availableBalance(UUID userId) {
-		return balances.getOrDefault(userId, 0);
+	public long availableBalance(Long userId) {
+		return balances.getOrDefault(userId, 0L);
 	}
 
-	public void setBalance(UUID userId, int amount) {
+	public void setBalance(Long userId, long amount) {
 		balances.put(userId, amount);
 	}
 
@@ -81,6 +82,7 @@ public class InMemoryLedgerPort implements LedgerPort {
 		nextTransferOutcome.set(TransferOutcome.NORMAL);
 	}
 
-	public record Settlement(UUID taskId, UUID publisherId, UUID runnerId, int refundToPublisher, int payToRunner) {
+	public record Settlement(String taskId, Long publisherId, Long runnerId,
+			long refundToPublisher, long payToRunner) {
 	}
 }

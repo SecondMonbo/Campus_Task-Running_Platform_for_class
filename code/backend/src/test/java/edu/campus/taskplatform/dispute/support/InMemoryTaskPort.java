@@ -2,7 +2,6 @@ package edu.campus.taskplatform.dispute.support;
 
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import edu.campus.taskplatform.common.error.ApiException;
@@ -16,23 +15,23 @@ import edu.campus.taskplatform.dispute.port.TaskStatus;
  */
 public class InMemoryTaskPort implements TaskParticipationPort {
 
-	private final Map<UUID, TaskSnapshot> tasks = new ConcurrentHashMap<>();
+	private final Map<String, TaskSnapshot> tasks = new ConcurrentHashMap<>();
 
 	public void put(TaskSnapshot snapshot) {
 		tasks.put(snapshot.taskId(), snapshot);
 	}
 
-	public TaskSnapshot get(UUID taskId) {
+	public TaskSnapshot get(String taskId) {
 		return tasks.get(taskId);
 	}
 
 	@Override
-	public Optional<TaskSnapshot> findTaskForUpdate(UUID taskId) {
+	public Optional<TaskSnapshot> findTaskForUpdate(String taskId) {
 		return Optional.ofNullable(tasks.get(taskId));
 	}
 
 	@Override
-	public void cancelTask(UUID taskId) {
+	public void cancelTask(String taskId) {
 		TaskSnapshot task = tasks.get(taskId);
 		if (task == null) {
 			throw new ApiException(ErrorCode.TASK_NOT_FOUND);

@@ -31,7 +31,7 @@ public class CancellationController {
 
 	@PostMapping("/tasks/{taskId}/cancellation-requests")
 	@ResponseStatus(HttpStatus.CREATED)
-	public ApiResponse<CancellationRequestDto> create(@PathVariable UUID taskId,
+	public ApiResponse<CancellationRequestDto> create(@PathVariable String taskId,
 			@Valid @RequestBody CreateCancellationRequest request) {
 		return ApiResponse.ok(cancellationService.create(taskId, request));
 	}

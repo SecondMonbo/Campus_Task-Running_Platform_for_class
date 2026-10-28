@@ -21,7 +21,7 @@ public interface AppealRepository extends JpaRepository<AppealEntity, UUID> {
 	@Query("select appeal from AppealEntity appeal where appeal.appealId = :appealId")
 	Optional<AppealEntity> findByIdForUpdate(@Param("appealId") UUID appealId);
 
-	boolean existsByTaskIdAndAppellantId(UUID taskId, UUID appellantId);
+	boolean existsByTaskIdAndAppellantId(String taskId, Long appellantId);
 
 	Page<AppealEntity> findByStatus(AppealStatus status, Pageable pageable);
 }
