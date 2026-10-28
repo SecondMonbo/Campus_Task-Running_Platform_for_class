@@ -1,77 +1,111 @@
 # 开发环境
 
-项目按已选技术栈搭建为单体后端和独立前端开发服务器：
+项目采用 Java 21、Spring Boot 4.1.1、Maven Wrapper、Vue 3、Vite、PostgreSQL 18.6 和 Flyway。后端默认端口为 `8080`，前端为 `5173`；Vite 会把 `/api` 和 `/actuator` 请求代理到后端。
 
-- Java 21、Spring Boot 4.1.1、Maven Wrapper 3.9.16。
-- Vue 3、Vite、Vue Router。
-- PostgreSQL 18.6、Flyway 数据库迁移。
-- 后端默认端口 `8080`，前端默认端口 `5173`；Vite 将 `/api` 与 `/actuator` 代理到后端。
+以下命令使用 Windows PowerShell，并假设当前目录是仓库根目录。
 
-## 准备数据库
+## 前置条件
 
-### 方式 A：Docker Compose
+- Java 21
+- Node.js `^20.19.0` 或 `>=22.12.0`、npm
+- Docker Desktop（推荐）或本机 PostgreSQL 18
 
-安装 Docker Desktop 后，在 `code` 目录复制 `.env.example` 为 `.env`，将 `POSTGRES_PASSWORD` 改成本地开发密码，然后启动数据库：
+## 1. 启动 PostgreSQL
+
+推荐使用项目提供的 Docker Compose。在仓库根目录运行：
 
 ```powershell
+Set-Location code
 Copy-Item .env.example .env
+```
+
+编辑 `code\.env`，为 `POSTGRES_PASSWORD` 设置本机开发密码，然后启动数据库：
+
+```powershell
 docker compose up -d
 ```
 
-Compose 只将 PostgreSQL 端口绑定到本机回环地址。数据库默认名为 `campus_task_platform`，开发用户名为 `campus_dev`。
+Compose 会创建 `campus_task_platform` 数据库和 `campus_dev` 用户，并仅将数据库端口绑定到本机。不要把 `.env` 或真实密码提交到 Git。
 
-### 方式 B：本机 PostgreSQL
+如果使用本机 PostgreSQL，请先启动 PostgreSQL 服务，并在 pgAdmin 中创建 `campus_task_platform` 数据库及 `campus_dev` 用户，授予该用户数据库所有权。后续 `DB_PASSWORD` 必须填写该用户的密码。
 
-使用 PostgreSQL 18.6（或课程环境已安装的 PostgreSQL 18），启动 PostgreSQL 服务，并在 pgAdmin 中创建：
+## 2. 启动后端
 
-- 数据库：`campus_task_platform`
-- 用户：`campus_dev`
-- 为该用户设置本地开发密码，并授予该数据库所有权
-
-如果 PostgreSQL 安装在 Windows 服务中，可在“服务”管理器启动相应服务。不要把真实密码提交到 Git。
-
-## 启动后端
-
-在 PowerShell 中运行：
+在仓库根目录打开 PowerShell 窗口 A：
 
 ```powershell
-cd code\backend
+Set-Location code\backend
 $env:DB_URL = "jdbc:postgresql://localhost:5432/campus_task_platform"
 $env:DB_USERNAME = "campus_dev"
-$env:DB_PASSWORD = "123"
+$env:DB_PASSWORD = "替换为本机 campus_dev 密码"
 .\mvnw.cmd spring-boot:run
 ```
 
-后端健康检查地址为 `http://localhost:8080/actuator/health`。默认数据库配置采用 `ddl-auto=validate`，正式业务表应通过 `src/main/resources/db/migration` 下的 Flyway 迁移脚本建立，不要依赖 Hibernate 自动建表。
-
-## 启动前端
-
-另开一个 PowerShell 窗口：
+请将占位文字替换为本机数据库密码；不要把密码写入项目文件或提交到 Git。首次启动时，Flyway 会自动创建表。看到应用启动成功后，可在另一个 PowerShell 窗口检查：
 
 ```powershell
-cd code\frontend
+Invoke-RestMethod http://localhost:8080/actuator/health
+```
+
+预期状态为 `UP`。
+
+## 3. 启动前端并注册测试账号
+
+打开 PowerShell 窗口 B，在仓库根目录运行：
+
+```powershell
+Set-Location code\frontend
+npm ci
 npm run dev
 ```
 
-打开 Vite 输出的本地地址（通常为 `http://localhost:5173`）。首页会检查后端健康状态。
+访问 Vite 输出的地址（通常为 `http://localhost:5173`），选择注册并创建测试账号。注册成功会自动登录，并在数据库事务中创建用户、钱包和 100 虚拟币的初始入账流水。
+
+## 4. 确认注册数据已写入 PostgreSQL
+
+在 pgAdmin 的 `campus_task_platform` 数据库查询工具中运行以下只读 SQL，将用户名替换为刚注册的账号：
+
+```sql
+SELECT u.user_id, u.username, u.display_name, u.role,
+       w.available_balance, w.frozen_balance,
+       t.type AS initial_transaction_type,
+       t.amount AS initial_transaction_amount
+FROM app_user u
+JOIN wallet_account w ON w.user_id = u.user_id
+LEFT JOIN wallet_transaction t
+       ON t.user_id = u.user_id AND t.type = 'INCOME'
+WHERE u.username = '替换为注册用户名'
+ORDER BY t.created_at;
+```
+
+预期能查到用户记录、钱包余额 `100`，以及金额为 `100` 的初始 `INCOME` 流水。密码只保存为 BCrypt 哈希，不要复制或分享 `password_hash`。
+
+## 本地管理员测试账号
+
+先通过注册页面创建一个专用测试账号，再由本地数据库管理员在 pgAdmin 中将**该账号**提升为管理员；不要直接插入用户记录，也不要提供公开注册时选择管理员角色的能力。用户表密码必须由应用以 BCrypt 方式生成，注册流程还会同时创建钱包及初始流水。
+
+在 pgAdmin 查询工具中执行下面的 SQL，并替换用户名：
+
+```sql
+UPDATE app_user
+SET role = 'ADMIN'
+WHERE username = '替换为专用测试管理员用户名'
+RETURNING user_id, username, role;
+```
+
+确认只更新一行，然后退出该账号并重新登录，使新的角色加载到会话中。此方法仅用于受控的本地课程演示数据库；不要在共享或生产数据库中随意授予管理员权限。普通用户注册仍只能获得 `USER` 角色。
 
 ## 构建与测试
 
 ```powershell
-cd code\backend
+Set-Location code\backend
 .\mvnw.cmd test
 ```
 
 ```powershell
-cd code\frontend
+Set-Location code\frontend
+npm test
 npm run build
 ```
 
-后端上下文测试使用 H2 内存数据库，不依赖运行中的 PostgreSQL；本地实际业务运行仍使用 PostgreSQL。
-
-## 当前骨架边界
-
-- 后端已配置 PostgreSQL、Flyway、Session/CSRF 安全基础和 Actuator 健康检查；业务登录、用户、任务、账务等 API 尚未实现。为避免 Spring Security 输出临时明文开发密码，默认内存用户自动配置已关闭，登录模块实现后需接入正式的用户认证服务。
-- 除健康检查和 CSRF Token 获取接口外，后端请求要求已认证会话；后续实现登录时继续遵守 `development_doc/API约定.md`。
-- 当前尚未创建业务表；数据结构确定后，新增 Flyway 迁移并编写对应测试。
-- 除 localhost 开发外，部署环境应启用 HTTPS，并设置 `SESSION_COOKIE_SECURE=true`。
+后端自动化测试使用 H2；它们不替代本地 PostgreSQL 数据库迁移和浏览器注册登录验证。数据库表结构由 `code\backend\src\main\resources\db\migration` 下的 Flyway 脚本管理，Hibernate 使用 `ddl-auto=validate`。

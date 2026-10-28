@@ -3,9 +3,9 @@ info:
   title: 校园跑腿平台 API
   version: 1.0.0
   description: |
-    根据 API约定.md 整理的首版接口契约，可导入 Apifox。
-    业务接口尚在开发中；没有在需求约定中明确的字段以最小可用契约表示，
-    实现前应由前后端负责人共同确认，确认后同步更新本文件。
+    根据 API约定.md 整理的接口契约，可导入 Apifox。
+    本文件包含已实现接口及规划接口；实现状态以“前后端接口差异与ID统一.md”为准。
+    管理接口必须由后端校验 ADMIN 角色，不能仅依赖前端路由限制。
   contact:
     name: Campus Task Platform Team
 servers:
@@ -15,7 +15,7 @@ tags:
   - name: Auth
     description: 注册、登录与会话
   - name: Users
-    description: 当前用户资料
+    description: 用户及本人参与的任务
   - name: Tasks
     description: 跑腿任务与执行流程
   - name: Wallet
@@ -158,48 +158,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CsrfToken'
-
-  /api/v1/users/me:
-    get:
-      tags: [Users]
-      summary: 查询本人资料
-      operationId: getMyProfile
-      responses:
-        '200':
-          description: 用户资料
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CurrentUserResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/ServerError'
-    patch:
-      tags: [Users]
-      summary: 修改本人资料
-      operationId: updateMyProfile
-      parameters:
-        - $ref: '#/components/parameters/CsrfToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateProfileRequest'
-      responses:
-        '200':
-          description: 修改后的用户资料
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CurrentUserResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/ServerError'
 
   /api/v1/users/me/tasks:
     get:
@@ -630,6 +588,7 @@ paths:
     get:
       tags: [Cancellations, Admin]
       summary: 管理员查询取消申请
+      description: 仅 ADMIN 角色可访问；普通登录用户返回 403。
       operationId: listAdminCancellationRequests
       parameters:
         - name: status
@@ -659,7 +618,7 @@ paths:
     post:
       tags: [Cancellations, Admin]
       summary: 管理员裁决取消争议
-      description: 仅处理关联任务仍未完成的待管理员处理申请；裁决和必要账务操作须原子提交。
+      description: 仅 ADMIN 角色可访问；处理关联任务仍未完成的待管理员处理申请，裁决和必要账务操作须原子提交。
       operationId: arbitrateCancellationRequest
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
@@ -729,6 +688,7 @@ paths:
     get:
       tags: [Appeals, Admin]
       summary: 管理员查询申诉
+      description: 仅 ADMIN 角色可访问；普通登录用户返回 403。
       operationId: listAdminAppeals
       parameters:
         - name: status
@@ -758,7 +718,7 @@ paths:
     post:
       tags: [Appeals, Admin]
       summary: 管理员裁决申诉
-      description: 支持或部分支持时划转金额不得超过被申诉方当前可用余额；任务仍保持 COMPLETED，原结算流水不修改。
+      description: 仅 ADMIN 角色可访问。支持或部分支持时划转金额不得超过被申诉方当前可用余额；任务仍保持 COMPLETED，原结算流水不修改。
       operationId: decideAppeal
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
@@ -1325,19 +1285,6 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/User'
-
-    UpdateProfileRequest:
-      type: object
-      additionalProperties: false
-      minProperties: 1
-      properties:
-        displayName:
-          type: string
-          minLength: 1
-          maxLength: 50
-        phone:
-          type: [string, 'null']
-          maxLength: 30
 
     Task:
       type: object
