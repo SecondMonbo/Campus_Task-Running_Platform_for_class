@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from './api/index.js'
 import {
@@ -22,6 +22,7 @@ const apiStatus = ref('checking')
 const signingOut = ref(false)
 const navigation = [
   { to: '/tasks', icon: 'pin', title: '任务大厅' },
+  { to: '/tasks/new', icon: 'plus', title: '发布任务' },
   { to: '/my-tasks', icon: 'tasks', title: '我的任务' },
   { to: '/wallet', icon: 'wallet', title: '钱包与流水' },
   { to: '/notifications', icon: 'bell', title: '通知中心' },
@@ -63,8 +64,14 @@ onMounted(() => {
 })
 onBeforeUnmount(() => globalThis.removeEventListener('campus:auth-expired', handleAuthExpired))
 
+const activeNavigation = computed(() => {
+  const matches = navigation.filter(
+    (item) => route.path === item.to || route.path.startsWith(`${item.to}/`),
+  )
+  return matches.sort((left, right) => right.to.length - left.to.length)[0]?.to
+})
 function isActive(item) {
-  return route.path === item.to || route.path.startsWith(`${item.to}/`)
+  return activeNavigation.value === item.to
 }
 
 async function logout() {
