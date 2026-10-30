@@ -24,6 +24,7 @@ export const api = {
   myTasks: (query, signal) => page('/users/me/tasks', query, signal),
   tasks: (query, signal) => page('/tasks', query, signal),
   task: (taskId, signal) => get(`/tasks/${id(taskId)}`, undefined, signal),
+  createTask: (body) => post('/tasks', body),
   accept: (taskId) => post(`/tasks/${id(taskId)}/acceptance`),
   deliver: (taskId) => post(`/tasks/${id(taskId)}/delivery`),
   complete: (taskId) => post(`/tasks/${id(taskId)}/completion`),

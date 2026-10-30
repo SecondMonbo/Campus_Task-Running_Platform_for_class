@@ -15,6 +15,31 @@ export const transactionTypes = {
   UNFREEZE: '解冻 / 退款',
 }
 
+/**
+ * 校验发布任务表单，返回错误提示；通过时返回空字符串。
+ * 规则与 openapi.yaml 的 CreateTaskRequest 及后端 TaskCreateRequest 保持一致。
+ */
+export function validateTaskDraft(
+  { title, description, reward, deadline, pickupLocation, deliveryLocation },
+  now = Date.now(),
+) {
+  const text = (value) => (typeof value === 'string' ? value.trim() : '')
+  if (!text(title)) return '请填写任务标题。'
+  if (text(title).length > 100) return '标题不能超过 100 个字符。'
+  if (!text(description)) return '请填写任务说明。'
+  if (text(description).length > 2000) return '任务说明不能超过 2000 个字符。'
+  if (!Number.isSafeInteger(reward) || reward < 1 || reward > 1000)
+    return '报酬必须是 1 到 1000 之间的整数。'
+  const deadlineTime = typeof deadline === 'string' ? Date.parse(deadline) : NaN
+  if (!Number.isFinite(deadlineTime)) return '请选择有效的截止时间。'
+  if (deadlineTime <= now) return '截止时间必须晚于当前时间。'
+  if (!text(pickupLocation)) return '请填写取件地点。'
+  if (text(pickupLocation).length > 200) return '取件地点不能超过 200 个字符。'
+  if (!text(deliveryLocation)) return '请填写送件地点。'
+  if (text(deliveryLocation).length > 200) return '送件地点不能超过 200 个字符。'
+  return ''
+}
+
 export function taskPermissions(task, user, now = Date.now()) {
   const publisher = Boolean(user && String(task.publisherId) === String(user.userId))
   const runner = Boolean(
