@@ -18,7 +18,6 @@ const router = useRouter()
 const mobileMenu = ref(false)
 const isDemo = import.meta.env.MODE === 'demo'
 const isMock = import.meta.env.MODE === 'apifox'
-const apiStatus = ref('checking')
 const signingOut = ref(false)
 const navigation = [
   { to: '/tasks', icon: 'pin', title: '任务大厅' },
@@ -49,18 +48,8 @@ function handleAuthExpired() {
   notify('登录已过期，请重新登录。', 'error')
   router.replace({ name: 'login', query: { redirect } })
 }
-async function checkApiStatus() {
-  try {
-    const response = await fetch('/actuator/health', { credentials: 'include' })
-    apiStatus.value = response.ok ? 'connected' : 'unavailable'
-  } catch {
-    apiStatus.value = 'unavailable'
-  }
-}
-
 onMounted(() => {
   globalThis.addEventListener('campus:auth-expired', handleAuthExpired)
-  if (!isDemo && !isMock) void checkApiStatus()
 })
 onBeforeUnmount(() => globalThis.removeEventListener('campus:auth-expired', handleAuthExpired))
 
@@ -173,15 +162,6 @@ async function logout() {
         <div class="topbar-right">
           <span v-if="isDemo" class="mock-indicator">本地演示</span>
           <span v-else-if="isMock" class="mock-indicator">Apifox Mock</span>
-          <span v-else class="api-health-indicator" :class="apiStatus" role="status">
-            {{
-              apiStatus === 'checking'
-                ? '正在检查后端'
-                : apiStatus === 'connected'
-                  ? '后端连接正常'
-                  : '后端暂不可用'
-            }}
-          </span>
           <span class="topbar-date">{{ date }}</span>
           <RouterLink
             to="/notifications"
