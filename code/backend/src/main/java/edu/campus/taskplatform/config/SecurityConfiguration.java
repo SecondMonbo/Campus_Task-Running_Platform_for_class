@@ -46,6 +46,7 @@ public class SecurityConfiguration {
 				.authorizeHttpRequests(authorize -> authorize
 						.requestMatchers("/actuator/health", "/api/v1/auth/csrf",
 								"/api/v1/auth/register", "/api/v1/auth/login").permitAll()
+						.requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
 						.anyRequest().authenticated())
 				.formLogin(form -> form.disable())
 				.httpBasic(basic -> basic.disable())
