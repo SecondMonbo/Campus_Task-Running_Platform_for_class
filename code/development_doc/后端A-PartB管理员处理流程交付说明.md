@@ -28,15 +28,20 @@
 ## 二、验证证据
 - 后端 `mvnw test`：**93 个测试全部通过**。
 - 前端 `npm run build`：构建成功。
-- 端到端联调：**30 项断言全部 PASS**。
+- 端到端联调（HTTP 层）：**30 项断言全部 PASS**。
   - 申诉：PENDING → 管理员 SUPPORTED 划转 20 → DECIDED；重复裁决 409，无二次划转。
   - 取消：PENDING_RESPONSE → 对方拒绝 → PENDING_ADMIN → 按比例裁决（退 25 / 跑腿员 15）→ ARBITRATED，任务 CANCELLED。
   - 普通用户访问/提交管理员接口均返回 **403**。
+- 浏览器端演示（真实登录 + 页面操作，均有截图）：
+  - 管理员 `admin_demo` 登录 → 进入管理工作台 `/admin`，投诉处理/用户查询/交易流水/操作日志显示"暂未开放"。
+  - 取消裁决列表显示待处理记录（含关联任务链接、状态、提交时间）→ 点击"裁决"→ 弹窗内可见关联任务报酬 → 填写"按比例取消 25/25 + 说明"→ 提交 → 提示"处理结果已提交"，列表自动刷新，记录从待处理列表移除。
+  - 普通用户 `publisher_demo` 登录后直接访问 `/admin` → 被路由守卫拦回"我的任务"页，提示"当前账号没有管理端访问权限"。
 - 最终余额（可用/冻结）：admin_demo 100/0、publisher_demo 75/0、runner_demo 125/0。
 
 ## 三、GitHub
-- 分支 `dev-Rrrr-Wang`，提交 `8c145e2`（已推送）。
-- **PR #12 已合并进 main**，合并提交 `84a552e`，main 已包含全部后端与前端改动。
+- 分支 `dev-Rrrr-Wang`，功能提交 `8c145e2`（已推送并合并）。
+- **PR #12 已合并进 main**，合并提交 `84a552e`，main 已包含全部功能代码。
+- **PR #13（open）**：`docs(backend): Part B 管理员处理流程交付说明`，提交 `35ed7a6` 新增本文档，待合入 main：https://github.com/SecondMonbo/Campus_Task-Running_Platform_for_class/pull/13
 
 ## 四、本地演示账号
 - 管理员：admin_demo / Admin12345
