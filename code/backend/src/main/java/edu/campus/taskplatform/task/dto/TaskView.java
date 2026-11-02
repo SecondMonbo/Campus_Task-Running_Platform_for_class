@@ -6,7 +6,7 @@ import edu.campus.taskplatform.task.TaskStatus;
 import java.time.Instant;
 
 /**
- * 任务响应视图，字段与 openapi.yaml 的 Task 一致；额外返回可空的时间戳供前端展示。
+ * 任务响应视图，字段与 openapi.yaml 的 Task 完全一致。
  * ID 统一按字符串返回。
  */
 public class TaskView {
@@ -22,10 +22,6 @@ public class TaskView {
     private String publisherId;
     private String runnerId;
     private Instant createdAt;
-    private Instant acceptedAt;
-    private Instant deliveredAt;
-    private Instant completedAt;
-    private String cancelReason;
 
     public static TaskView from(Task task) {
         TaskView v = new TaskView();
@@ -40,10 +36,6 @@ public class TaskView {
         v.publisherId = String.valueOf(task.getPublisherId());
         v.runnerId = task.getRunnerId() == null ? null : String.valueOf(task.getRunnerId());
         v.createdAt = task.getPublishedAt();
-        v.acceptedAt = task.getAcceptedAt();
-        v.deliveredAt = task.getDeliveredAt();
-        v.completedAt = task.getCompletedAt();
-        v.cancelReason = task.getCancelReason();
         return v;
     }
 
@@ -89,21 +81,5 @@ public class TaskView {
 
     public Instant getCreatedAt() {
         return createdAt;
-    }
-
-    public Instant getAcceptedAt() {
-        return acceptedAt;
-    }
-
-    public Instant getDeliveredAt() {
-        return deliveredAt;
-    }
-
-    public Instant getCompletedAt() {
-        return completedAt;
-    }
-
-    public String getCancelReason() {
-        return cancelReason;
     }
 }

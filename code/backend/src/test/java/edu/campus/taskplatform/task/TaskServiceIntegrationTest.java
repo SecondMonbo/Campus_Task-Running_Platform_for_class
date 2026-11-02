@@ -110,7 +110,6 @@ class TaskServiceIntegrationTest {
         taskService.acceptTask(runner, taskId);
         TaskView delivered = taskService.deliverTask(runner, taskId);
         assertEquals(TaskStatus.WAITING_FOR_ACCEPTANCE, delivered.getStatus());
-        assertNotNull(delivered.getDeliveredAt());
         // 报酬继续暂存，不因送达入账：跑腿员仍是初始 5000
         assertEquals(30, accounting.getFrozenBalance(publisher.userId()));
         assertEquals(5000, accounting.getAvailableBalance(runner.userId()));
@@ -121,7 +120,6 @@ class TaskServiceIntegrationTest {
         String taskId = deliveredTask();
         TaskView completed = taskService.completeTask(publisher, taskId);
         assertEquals(TaskStatus.COMPLETED, completed.getStatus());
-        assertNotNull(completed.getCompletedAt());
         // 发布者冻结清零（30 转出），跑腿员入账 30（跑腿员初始 5000）
         assertEquals(0, accounting.getFrozenBalance(publisher.userId()));
         assertEquals(5030, accounting.getAvailableBalance(runner.userId()));
