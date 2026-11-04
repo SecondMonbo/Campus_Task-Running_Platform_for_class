@@ -42,8 +42,8 @@
   - 通知中心列表正确显示通知（含"未读"标签）→ 点"标记已读"后该条未读消失 → "仅看未读"只显示剩余未读，底部显示"共 N 条记录"。
 
 ## 三、GitHub
-- 分支 `dev-Rrrr-Wang`，本次 Part A 功能与本文档提交在 dev-Rrrr-Wang 分支。
-- 已提交 **PR（open，未合并 main）**：head=dev-Rrrr-Wang，base=main。PR 编号与链接见文末（或 PR 创建后补充）。
+- 分支 `dev-Rrrr-Wang`，功能提交 `5889b7f`（已推送）。
+- **PR #14（open，未合并 main）**：head=dev-Rrrr-Wang，base=main，URL：https://github.com/SecondMonbo/Campus_Task-Running_Platform_for_class/pull/14
 - 说明：Part A 仅提交 PR 申请，不直接合并主分支，由组长 Review 后合入。
 
 ## 四、本地演示账号
