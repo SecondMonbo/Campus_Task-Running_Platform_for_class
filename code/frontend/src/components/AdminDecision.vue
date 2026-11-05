@@ -9,6 +9,7 @@ import {
 } from '../domain/tasks.js'
 import AppModal from './AppModal.vue'
 import AsyncPanel from './AsyncPanel.vue'
+import { complaintActions, recordOnlyActions, validateComplaintDecision } from '../domain/admin.js'
 const props = defineProps({ kind: String, record: Object })
 const emit = defineEmits(['close'])
 const busy = ref(false)
@@ -21,10 +22,7 @@ const form = ref({
   result: 'REJECTED',
   transferAmount: 0,
   decisionNote: '',
-  actions: [],
-  creditAdjustment: -2,
-  creditReason: '',
-  financialAdjustment: 0,
+  actions: ['LOG_ONLY'],
 })
 const {
   data: task,
@@ -38,14 +36,6 @@ const titles = {
   'cancellation-requests': '裁决取消争议',
   appeals: '裁决已完成任务申诉',
   complaints: '处理投诉',
-}
-const complaintActions = {
-  WARNING: '提醒与警告',
-  CREDIT_ADJUSTMENT: '扣除信用分',
-  FINANCIAL_ADJUSTMENT: '账务处理',
-  ACCOUNT_FREEZE: '冻结账号',
-  LOG_ONLY: '记入处理记录',
-  OFFLINE_REFERRAL: '移交线下处理',
 }
 function resetAllocation() {
   form.value.refundAmount = 0
@@ -73,19 +63,7 @@ async function submit() {
     error.value = validateAppealDecision(body)
   } else {
     body = { actions: [...values.actions], decisionNote: values.decisionNote.trim() }
-    if (!body.actions.length) error.value = '请至少选择一种处理手段。'
-    if (!body.decisionNote) error.value = '请填写处理说明。'
-    if (body.actions.includes('CREDIT_ADJUSTMENT')) {
-      body.creditAdjustment = Number(values.creditAdjustment)
-      if (!values.creditReason) error.value = '请选择扣分依据。'
-      body.decisionNote = `扣分依据：${values.creditReason}。\n${body.decisionNote}`
-    }
-    if (body.actions.includes('FINANCIAL_ADJUSTMENT')) {
-      body.financialAdjustment = Number(values.financialAdjustment)
-      if (!Number.isSafeInteger(body.financialAdjustment) || body.financialAdjustment === 0)
-        error.value = '请填写非零整数账务调整金额。'
-    }
-    if (body.decisionNote.length > 1000) error.value = '处理说明（含扣分依据）不能超过 1000 字。'
+    error.value = validateComplaintDecision(body)
   }
   if (error.value) return
   busy.value = true
@@ -93,11 +71,16 @@ async function submit() {
     if (props.kind === 'cancellation-requests') await api.arbitrate(props.record.requestId, body)
     else if (props.kind === 'appeals') await api.decideAppeal(props.record.appealId, body)
     else await api.handleComplaint(props.record.complaintId, body)
-    notify('处理结果已提交。')
+    notify(props.kind === 'complaints' ? '投诉处理记录已保存。' : '处理结果已提交。')
     changed()
     emit('close')
   } catch (failure) {
     error.value = failure.message
+    if (props.kind === 'complaints' && failure.status === 409) {
+      notify(failure.message, 'error')
+      changed()
+      emit('close')
+    }
   } finally {
     busy.value = false
   }
@@ -115,6 +98,16 @@ async function submit() {
           <dt>关联任务</dt>
           <dd>{{ record.taskId || '—' }}</dd>
         </div>
+        <template v-if="kind === 'complaints'">
+          <div>
+            <dt>投诉人 / 被投诉人</dt>
+            <dd>{{ record.reporterId }} / {{ record.targetUserId || '—' }}</dd>
+          </div>
+          <div>
+            <dt>投诉类型</dt>
+            <dd>{{ record.category }}</dd>
+          </div>
+        </template>
       </dl>
       <p v-if="record.reason || record.description" class="notice preserve-lines">
         {{ record.reason }}
@@ -197,24 +190,18 @@ async function submit() {
       </template>
       <template v-else>
         <fieldset class="checkbox-group">
-          <legend>处理手段（可多选）</legend>
+          <legend>处理方式（可多选）</legend>
           <label v-for="(label, value) in complaintActions" :key="value">
-            <input v-model="form.actions" type="checkbox" :value="value" />
+            <input
+              v-model="form.actions"
+              type="checkbox"
+              :value="value"
+              :disabled="!recordOnlyActions.includes(value)"
+            />
             {{ label }}
+            <span v-if="!recordOnlyActions.includes(value)" class="small muted">暂未开放</span>
           </label>
         </fieldset>
-        <label v-if="form.actions.includes('CREDIT_ADJUSTMENT')" class="field">
-          扣除信用分
-          <select v-model="form.creditAdjustment">
-            <option :value="-2">2 分</option>
-            <option :value="-5">5 分</option>
-            <option :value="-10">10 分</option>
-          </select>
-        </label>
-        <label v-if="form.actions.includes('FINANCIAL_ADJUSTMENT')" class="field">
-          账务调整金额
-          <input v-model="form.financialAdjustment" type="number" step="1" required />
-        </label>
         <label class="field">
           处理说明
           <textarea
@@ -225,19 +212,11 @@ async function submit() {
             placeholder="说明处理依据、涉及对象与处理结论"
           />
         </label>
-        <label v-if="form.actions.includes('CREDIT_ADJUSTMENT')" class="field">
-          扣分依据
-          <select v-model="form.creditReason" required>
-            <option disabled value="">请选择扣分依据</option>
-            <option>超时</option>
-            <option>失联</option>
-            <option>物品损坏</option>
-            <option>恶意取消</option>
-            <option>其他</option>
-          </select>
-        </label>
       </template>
-      <p class="notice">请核对处理结论和金额。提交后将通知相关用户并执行相应处理。</p>
+      <p v-if="kind === 'complaints'" class="notice">
+        本次仅保存处理记录。提醒与线下移交需另行完成；扣分、调账、限制功能和冻结账号暂未开放。
+      </p>
+      <p v-else class="notice">请核对处理结论和金额后提交。</p>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>
       <footer class="modal-footer">
         <button type="button" class="button secondary" :disabled="busy" @click="$emit('close')">

@@ -271,6 +271,7 @@ async function verifyFrontendB(page) {
                 ? 'DECIDED'
                 : 'PROCESSED',
         })
+        if (resource === 'complaints') Object.assign(item, { handledBy: user.userId, handledAt: now })
         if (resource === 'cancellation-requests' && body.ruling !== 'SUPPORT_CONTINUE')
           tasks.find((task) => task.taskId === item.taskId).status = 'CANCELLED'
         if (resource === 'appeals' && body.transferAmount > 0)
@@ -517,21 +518,23 @@ async function verifyFrontendB(page) {
   )
   await page.getByRole('button', { name: '投诉处理', exact: true }).click()
   await page.getByRole('button', { name: '处理', exact: true }).first().click()
-  await page.getByLabel('提醒与警告', { exact: true }).check()
-  await page.getByLabel('扣除信用分', { exact: true }).check()
-  await page.getByRole('combobox', { name: '扣分依据', exact: true }).selectOption('物品损坏')
+  await page.getByLabel('记录提醒与警告', { exact: true }).check()
+  check(await page.getByRole('checkbox', { name: /扣除信用分/ }).isDisabled(), '处罚入口暂未开放')
   await page.getByLabel('处理说明').fill('已核实并提醒当事人注意履约')
   await page.getByRole('button', { name: '确认提交', exact: true }).click()
   await settle()
   check(
     calls
       .find((call) => call.path.endsWith('/p1/actions'))
-      .body.decisionNote.includes('扣分依据：物品损坏'),
-    '扣分依据必须记录在处理说明中',
+      .body.actions.includes('WARNING'),
+    '处理方式必须提交留痕',
   )
-  for (const tab of ['用户查询', '任务查询', '交易流水', '操作日志']) {
+  for (const tab of ['任务查询', '交易流水']) {
     await page.getByRole('button', { name: tab, exact: true }).click()
     await page.locator('tbody tr').first().waitFor()
+  }
+  for (const tab of ['用户查询', '操作日志']) {
+    check(await page.getByRole('button', { name: new RegExp(tab) }).isDisabled(), '未实现查询保持禁用')
   }
   record('申诉裁决保留原任务和流水、投诉处理与管理查询')
 
