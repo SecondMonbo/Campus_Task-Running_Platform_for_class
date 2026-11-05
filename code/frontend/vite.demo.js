@@ -220,6 +220,43 @@ export function statefulDemoApi() {
       return
     }
 
+    if (path === '/tasks' && method === 'POST') {
+      const text = (value) => (typeof value === 'string' ? value.trim() : '')
+      const title = text(body.title)
+      const description = text(body.description)
+      const pickupLocation = text(body.pickupLocation)
+      const deliveryLocation = text(body.deliveryLocation)
+      const reward = body.reward
+      const deadline = typeof body.deadline === 'string' ? Date.parse(body.deadline) : NaN
+      const invalid =
+        !title || title.length > 100 ||
+        !description || description.length > 2000 ||
+        !pickupLocation || pickupLocation.length > 200 ||
+        !deliveryLocation || deliveryLocation.length > 200 ||
+        !Number.isSafeInteger(reward) || reward < 1 || reward > 1000 ||
+        !Number.isFinite(deadline) || deadline <= Date.now()
+      if (invalid) {
+        failure(response, 400, 'VALIDATION_ERROR', '请检查任务标题、说明、报酬、截止时间和地点。')
+        return
+      }
+      const task = {
+        taskId: randomUUID(),
+        title,
+        description,
+        reward,
+        deadline: new Date(deadline).toISOString(),
+        pickupLocation,
+        deliveryLocation,
+        status: 'WAITING_FOR_TAKER',
+        publisherId: user.userId,
+        runnerId: null,
+        createdAt: new Date().toISOString(),
+      }
+      tasks.set(task.taskId, task)
+      success(response, task, 201)
+      return
+    }
+
     failure(response, 404, 'ENDPOINT_NOT_FOUND', '前端 A 本地演示服务未实现此接口。')
   }
 

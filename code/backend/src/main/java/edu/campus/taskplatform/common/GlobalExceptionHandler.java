@@ -1,14 +1,16 @@
 package edu.campus.taskplatform.common;
 
+import java.util.stream.Collectors;
+
 import edu.campus.taskplatform.accounting.InsufficientBalanceException;
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.validation.FieldError;
-import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.validation.BindException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -35,10 +37,22 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ErrorCode.INSUFFICIENT_BALANCE, ex.getMessage()));
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException ex) {
-        FieldError fieldError = ex.getBindingResult().getFieldError();
-        String message = fieldError == null ? "请求参数不合法" : fieldError.getDefaultMessage();
+    @ExceptionHandler(edu.campus.taskplatform.common.error.ApiException.class)
+    public ResponseEntity<ApiResponse<Void>> handleApiException(
+            edu.campus.taskplatform.common.error.ApiException ex) {
+        return ResponseEntity.status(ex.errorCode().status())
+                .body(ApiResponse.error(ex.errorCode().name(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(BindException.class)
+    public ResponseEntity<ApiResponse<Void>> handleBindingException(BindException ex) {
+        String message = ex.getBindingResult().getFieldErrors().stream()
+                .map(error -> error.getField() + ": " + error.getDefaultMessage())
+                .distinct()
+                .collect(Collectors.joining("; "));
+        if (message.isBlank()) {
+            message = "请求参数不合法";
+        }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(ErrorCode.VALIDATION_ERROR, message));
     }
@@ -57,6 +71,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(ErrorCode.VALIDATION_ERROR, "请求参数不合法"));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        return ResponseEntity.status(ErrorCode.DUPLICATE_ACTION.httpStatus())
+                .body(ApiResponse.error(ErrorCode.DUPLICATE_ACTION, "重复的业务操作"));
     }
 
     @ExceptionHandler(Exception.class)

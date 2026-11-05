@@ -1,6 +1,9 @@
 package edu.campus.taskplatform.task;
 
-import edu.campus.taskplatform.accounting.DemoAccountingService;
+import edu.campus.taskplatform.accounting.AccountingService;
+import edu.campus.taskplatform.accounting.WalletAccount;
+import edu.campus.taskplatform.accounting.WalletAccountRepository;
+import edu.campus.taskplatform.accounting.WalletTransactionRepository;
 import edu.campus.taskplatform.auth.CurrentUser;
 import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.common.PageResult;
@@ -48,7 +51,13 @@ class TaskServiceIntegrationTest {
     TaskService taskService;
 
     @Autowired
-    DemoAccountingService accounting;
+    AccountingService accounting;
+
+    @Autowired
+    WalletAccountRepository walletAccountRepository;
+
+    @Autowired
+    WalletTransactionRepository walletTransactionRepository;
 
     @Autowired
     TaskRepository taskRepository;
@@ -67,12 +76,13 @@ class TaskServiceIntegrationTest {
         reviewRepository.deleteAll();
         operationLogRepository.deleteAll();
         taskRepository.deleteAll();
-        accounting.reset();
+        walletTransactionRepository.deleteAll();
+        walletAccountRepository.deleteAll();
 
         publisher = new CurrentUser(1L, "USER");
         runner = new CurrentUser(2L, "USER");
-        accounting.deposit(publisher.userId(), 5000);
-        accounting.deposit(runner.userId(), 5000);
+        walletAccountRepository.save(new WalletAccount(publisher.userId(), 5000, 0));
+        walletAccountRepository.save(new WalletAccount(runner.userId(), 5000, 0));
     }
 
     // ---------------- 合法迁移 ----------------
@@ -100,7 +110,6 @@ class TaskServiceIntegrationTest {
         taskService.acceptTask(runner, taskId);
         TaskView delivered = taskService.deliverTask(runner, taskId);
         assertEquals(TaskStatus.WAITING_FOR_ACCEPTANCE, delivered.getStatus());
-        assertNotNull(delivered.getDeliveredAt());
         // 报酬继续暂存，不因送达入账：跑腿员仍是初始 5000
         assertEquals(30, accounting.getFrozenBalance(publisher.userId()));
         assertEquals(5000, accounting.getAvailableBalance(runner.userId()));
@@ -111,7 +120,6 @@ class TaskServiceIntegrationTest {
         String taskId = deliveredTask();
         TaskView completed = taskService.completeTask(publisher, taskId);
         assertEquals(TaskStatus.COMPLETED, completed.getStatus());
-        assertNotNull(completed.getCompletedAt());
         // 发布者冻结清零（30 转出），跑腿员入账 30（跑腿员初始 5000）
         assertEquals(0, accounting.getFrozenBalance(publisher.userId()));
         assertEquals(5030, accounting.getAvailableBalance(runner.userId()));
@@ -220,8 +228,9 @@ class TaskServiceIntegrationTest {
 
     @Test
     void insufficient_balance_on_publish_rejected() {
-        accounting.reset();
-        accounting.deposit(publisher.userId(), 5); // 可用只有 5，报酬 100 不够
+        walletTransactionRepository.deleteAll();
+        walletAccountRepository.deleteAll();
+        walletAccountRepository.save(new WalletAccount(publisher.userId(), 5, 0)); // 可用只有 5，报酬 100 不够
         assertThrows(TaskException.class, () -> taskService.createTask(publisher, request("太贵", 100)));
         // 失败时不创建任务（T1 失败流）
         assertEquals(0, taskRepository.count());

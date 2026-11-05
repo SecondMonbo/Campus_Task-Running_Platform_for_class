@@ -59,6 +59,12 @@ const router = createRouter({
       component: () => import('./views/TaskHallView.vue'),
       meta: { title: '任务大厅' },
     },
+    {
+      path: '/tasks/new',
+      name: 'task-publish',
+      component: () => import('./views/TaskPublishView.vue'),
+      meta: { title: '发布任务' },
+    },
     ...frontendBRoutes,
     {
       path: '/:pathMatch(.*)*',

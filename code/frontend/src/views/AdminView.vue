@@ -26,6 +26,8 @@ const tabs = {
   transactions: '交易流水',
   'operation-logs': '操作日志',
 }
+// 尚未提供后端接口的管理模块：先标注“暂未开放”，不作为可用功能展示。
+const pendingSections = ['complaints', 'users', 'transactions', 'operation-logs']
 const statuses = computed(
   () =>
     ({
@@ -54,6 +56,7 @@ const { items, total, page, size, loading, error, reload } = usePaged(
   [section, status, search, filters],
 )
 function switchSection(value) {
+  if (pendingSections.includes(value)) return
   status.value =
     { 'cancellation-requests': 'PENDING_ADMIN', appeals: 'PENDING', complaints: 'PENDING' }[
       value
@@ -105,9 +108,12 @@ const labelForStatus = (value) => statuses.value[value] ?? value
           :key="key"
           :class="{ active: section === key }"
           :aria-pressed="section === key"
+          :disabled="pendingSections.includes(key)"
+          :title="pendingSections.includes(key) ? '该模块暂未开放' : undefined"
           @click="switchSection(key)"
         >
           {{ label }}
+          <span v-if="pendingSections.includes(key)" class="pending-badge">暂未开放</span>
         </button>
       </nav>
       <form class="admin-filters" @submit.prevent="applySearch">
