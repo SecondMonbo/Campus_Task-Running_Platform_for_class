@@ -4,6 +4,7 @@ import edu.campus.taskplatform.accounting.AccountingService;
 import edu.campus.taskplatform.accounting.InsufficientBalanceException;
 import edu.campus.taskplatform.auth.CurrentUser;
 import edu.campus.taskplatform.common.ErrorCode;
+import edu.campus.taskplatform.notification.NotificationService;
 import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
 import edu.campus.taskplatform.task.dto.CreateReviewRequest;
@@ -50,15 +51,18 @@ public class TaskService {
     private final TaskOperationLogRepository operationLogRepository;
     private final TaskReviewRepository reviewRepository;
     private final AccountingService accounting;
+    private final NotificationService notificationService;
 
     public TaskService(TaskRepository taskRepository,
                        TaskOperationLogRepository operationLogRepository,
                        TaskReviewRepository reviewRepository,
-                       AccountingService accounting) {
+                       AccountingService accounting,
+                       NotificationService notificationService) {
         this.taskRepository = taskRepository;
         this.operationLogRepository = operationLogRepository;
         this.reviewRepository = reviewRepository;
         this.accounting = accounting;
+        this.notificationService = notificationService;
     }
 
     // ---------------------------------------------------------------
@@ -218,6 +222,8 @@ public class TaskService {
         task.setAcceptedAt(Instant.now());
         taskRepository.save(task);
         writeLog(taskId, runner.userId(), "ACCEPT", "接单");
+        safeNotify(task.getPublisherId(), "任务被接取",
+                "你的任务「" + task.getTitle() + "」已被接取，请留意进度。", taskId);
         return TaskView.from(task);
     }
 
@@ -240,8 +246,9 @@ public class TaskService {
         task.setStatus(TaskStatus.WAITING_FOR_ACCEPTANCE);
         task.setDeliveredAt(Instant.now());
         taskRepository.save(task);
-        // 送达通知属通知模块（后端B/组长），此处仅留痕；通知触发由通知服务接入
         writeLog(taskId, runner.userId(), "DELIVER", "确认送达");
+        safeNotify(task.getPublisherId(), "任务已送达",
+                "「" + task.getTitle() + "」已确认送达，请及时验收。", taskId);
         return TaskView.from(task);
     }
 
@@ -270,6 +277,8 @@ public class TaskService {
         doSettle(taskId, publisher.userId(), runnerId, reward);
         taskRepository.save(task);
         writeLog(taskId, publisher.userId(), "COMPLETE", "确认完成，报酬=" + reward + " 结算给跑腿员");
+        safeNotify(runnerId, "任务已完成",
+                "「" + task.getTitle() + "」已完成，报酬 " + reward + " 虚拟币已结算到你的钱包。", taskId);
         return TaskView.from(task);
     }
 
@@ -294,6 +303,8 @@ public class TaskService {
                 publisher.userId(), task.getRunnerId(), req.getScore(), req.getContent(), Instant.now());
         reviewRepository.save(review);
         writeLog(taskId, publisher.userId(), "REVIEW", "提交评价");
+        safeNotify(task.getRunnerId(), "收到新的评价",
+                "你的任务「" + task.getTitle() + "」收到发布者评价，评分 " + req.getScore() + " 星。", taskId);
         return review;
     }
 
@@ -320,6 +331,15 @@ public class TaskService {
     private void writeLog(String taskId, Long actorId, String action, String detail) {
         operationLogRepository.save(new TaskOperationLog(
                 UUID.randomUUID().toString(), taskId, actorId, action, detail, Instant.now()));
+    }
+
+    // 通知写入失败不回滚任务主流程：通知为独立事务，异常在此兜底并记录日志。
+    private void safeNotify(Long userId, String title, String content, String taskId) {
+        try {
+            notificationService.notify(userId, title, content, taskId);
+        } catch (Exception e) {
+            log.warn("写入通知失败：recipient={}, task={}, reason={}", userId, taskId, e.getMessage());
+        }
     }
 
     // 账务调用统一包装：把账务实现的余额不足异常转成服务层稳定的 TaskException。

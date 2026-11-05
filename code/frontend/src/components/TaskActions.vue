@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { api } from '../api/index.js'
 import { changed, notify, session } from '../composables/state.js'
-import { taskPermissions } from '../domain/tasks.js'
+import { taskPermissions, validateTaskDraft } from '../domain/tasks.js'
 import AppModal from './AppModal.vue'
 
 const props = defineProps({ task: { type: Object, required: true }, compact: Boolean })
@@ -17,6 +17,9 @@ const titles = {
   accept: '确认接取任务',
   deliver: '确认任务已送达',
   complete: '验收并确认完成',
+  edit: '编辑任务',
+  withdraw: '撤回任务',
+  review: '评价跑腿员',
   cancel: '申请取消任务',
   appeal: '提交任务申诉',
   complain: '提交投诉',
@@ -25,18 +28,67 @@ const copy = {
   accept: '接取后请按约定完成任务；你可以在“我接取的”中查看执行进度。',
   deliver: '请确认已完成约定的取送事项。送达后，任务进入待验收，报酬继续冻结。',
   complete: '请确认已验收无误。完成后，冻结的任务报酬将全额结算给跑腿员。',
+  edit: '仅待接单任务可修改。修改报酬时，按差额补冻结或解冻。',
+  withdraw: '撤回后任务将取消，冻结的报酬全额退回。撤回后不可恢复。',
+  review: '请基于本次任务体验为跑腿员评分（1-5 星）。每条任务仅可评价一次。',
   cancel: '申请提交后由对方应答，任务不会立即取消。对方拒绝后将转管理员裁决。',
   appeal: '申诉不会撤销任务完成状态或原结算。每位参与者对同一任务最多提交一次。',
   complain: '请如实描述任务中的问题，提交后由管理员处理。',
 }
+function toLocalInput(iso) {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`
+}
 function open(kind) {
   action.value = kind
   error.value = ''
-  form.value = { reason: '', description: '', category: '' }
+  if (kind === 'edit') {
+    form.value = {
+      title: props.task.title,
+      description: props.task.description,
+      reward: props.task.reward,
+      deadline: toLocalInput(props.task.deadline),
+      pickupLocation: props.task.pickupLocation,
+      deliveryLocation: props.task.deliveryLocation,
+    }
+  } else if (kind === 'review') {
+    form.value = { score: 0, content: '' }
+  } else if (kind === 'withdraw') {
+    form.value = { reason: '' }
+  } else {
+    form.value = { reason: '', description: '', category: '' }
+  }
 }
 async function submit() {
   if (busy.value) return
   error.value = ''
+  if (action.value === 'edit') {
+    const draft = {
+      title: form.value.title,
+      description: form.value.description,
+      reward: form.value.reward,
+      deadline: form.value.deadline,
+      pickupLocation: form.value.pickupLocation,
+      deliveryLocation: form.value.deliveryLocation,
+    }
+    const validation = validateTaskDraft(draft)
+    if (validation) {
+      error.value = validation
+      return
+    }
+  }
+  if (action.value === 'withdraw' && !form.value.reason.trim()) {
+    error.value = '请填写撤回原因。'
+    return
+  }
+  if (action.value === 'review' && !form.value.score) {
+    error.value = '请选择评分。'
+    return
+  }
   if (action.value === 'cancel' && !form.value.reason.trim()) {
     error.value = '请填写取消原因。'
     return
@@ -51,6 +103,24 @@ async function submit() {
     let result
     if (['accept', 'deliver', 'complete'].includes(kind))
       result = await api[kind](props.task.taskId)
+    if (kind === 'edit')
+      result = await api.updateTask(props.task.taskId, {
+        title: form.value.title.trim(),
+        description: form.value.description.trim(),
+        reward: form.value.reward,
+        deadline: new Date(form.value.deadline).toISOString(),
+        pickupLocation: form.value.pickupLocation.trim(),
+        deliveryLocation: form.value.deliveryLocation.trim(),
+      })
+    if (kind === 'withdraw')
+      result = await api.withdraw(props.task.taskId, { reason: form.value.reason.trim() })
+    if (kind === 'review') {
+      const content = form.value.content.trim()
+      result = await api.review(props.task.taskId, {
+        score: form.value.score,
+        ...(content ? { content } : {}),
+      })
+    }
     if (kind === 'cancel')
       result = await api.cancel(props.task.taskId, { reason: form.value.reason.trim() })
     if (kind === 'appeal')
@@ -72,6 +142,9 @@ async function submit() {
       accept: '接单成功。',
       deliver: '已送达，等待发布者验收。',
       complete: '任务已完成，报酬已结算。',
+      edit: '任务已更新。',
+      withdraw: '任务已撤回，报酬已退回。',
+      review: '评价已提交。',
       cancel: '取消申请已提交。',
       appeal: '申诉已提交，等待管理员处理。',
       complain: '投诉已提交，等待管理员处理。',
@@ -83,7 +156,9 @@ async function submit() {
           ? { label: '申诉编号', id: result.appealId }
           : kind === 'complain'
             ? { label: '投诉编号', id: result.complaintId }
-            : null
+            : kind === 'review'
+              ? { label: '评价编号', id: result.reviewId }
+              : null
     notify(messages[kind])
     action.value = ''
     changed()
@@ -114,6 +189,15 @@ async function submit() {
       验收并完成
     </button>
     <template v-if="!compact">
+      <button v-if="permissions.edit" class="button secondary" @click="open('edit')">
+        编辑任务
+      </button>
+      <button v-if="permissions.withdraw" class="button text-button" @click="open('withdraw')">
+        撤回任务
+      </button>
+      <button v-if="permissions.review" class="button secondary" @click="open('review')">
+        评价跑腿员
+      </button>
       <button v-if="permissions.cancel" class="button secondary" @click="open('cancel')">
         申请取消
       </button>
@@ -134,6 +218,80 @@ async function submit() {
     <form class="modal-body" @submit.prevent="submit">
       <p class="modal-task-title">{{ task.title }}</p>
       <p class="muted">{{ copy[action] }}</p>
+      <template v-if="action === 'edit'">
+        <label class="field">
+          标题
+          <input v-model="form.title" required maxlength="100" placeholder="一句话说明要送什么" />
+        </label>
+        <label class="field">
+          任务说明
+          <textarea
+            v-model="form.description"
+            required
+            maxlength="2000"
+            rows="3"
+            placeholder="补充取送要求与注意事项"
+          />
+        </label>
+        <div class="form-columns">
+          <label class="field">
+            报酬
+            <input v-model.number="form.reward" type="number" min="1" max="1000" required />
+          </label>
+          <label class="field">
+            截止时间
+            <input v-model="form.deadline" type="datetime-local" required />
+          </label>
+        </div>
+        <label class="field">
+          取件地点
+          <input v-model="form.pickupLocation" required maxlength="200" placeholder="哪里取" />
+        </label>
+        <label class="field">
+          送件地点
+          <input v-model="form.deliveryLocation" required maxlength="200" placeholder="送到哪" />
+        </label>
+      </template>
+      <template v-if="action === 'withdraw'">
+        <label class="field">
+          撤回原因
+          <textarea
+            v-model="form.reason"
+            required
+            maxlength="200"
+            rows="3"
+            placeholder="请说明撤回原因"
+          />
+        </label>
+      </template>
+      <template v-if="action === 'review'">
+        <label class="field">
+          评分
+          <div class="rating" role="radiogroup" aria-label="评分">
+            <button
+              v-for="score in [1, 2, 3, 4, 5]"
+              :key="score"
+              type="button"
+              class="rating-star"
+              :class="{ active: form.score >= score }"
+              :aria-pressed="form.score === score"
+              @click="form.score = score"
+            >
+              ★
+            </button>
+            <span v-if="form.score" class="small muted">{{ form.score }} / 5</span>
+          </div>
+        </label>
+        <label class="field">
+          评价内容
+          <textarea
+            v-model="form.content"
+            maxlength="200"
+            rows="3"
+            placeholder="选填，说说本次体验"
+          />
+        </label>
+      </template>
       <label v-if="action === 'cancel'" class="field">
         取消原因
         <textarea

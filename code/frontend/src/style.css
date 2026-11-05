@@ -2455,3 +2455,29 @@ input[readonly] {
     margin-top: 25px;
   }
 }
+
+.rating {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.rating-star {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 0.1rem;
+  transition: color 0.15s ease;
+}
+
+.rating-star:hover {
+  color: #fbbf24;
+}
+
+.rating-star.active {
+  color: #f59e0b;
+}
