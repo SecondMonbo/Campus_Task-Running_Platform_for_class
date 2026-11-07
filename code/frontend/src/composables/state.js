@@ -75,6 +75,12 @@ export function usePaged(loader, filters = []) {
     (signal) => loader({ page: page.value, size: size.value }, signal),
     [page, size, ...filters, revision],
   )
+  watch(resource.data, (data) => {
+    if (!data) return
+    const lastPage = Math.max(0, Math.ceil(data.total / size.value) - 1)
+    // 处理记录后，末页可能不再存在；重新请求最后一个有效页。
+    if (page.value > lastPage) page.value = lastPage
+  })
   return {
     ...resource,
     page,
