@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { api } from '../api/index.js'
 import { session, usePaged } from '../composables/state.js'
 import { formatDate, formatNumber, taskStatuses, transactionTypes } from '../domain/tasks.js'
+import { complaintActions } from '../domain/admin.js'
 import AdminDecision from '../components/AdminDecision.vue'
 import AppIcon from '../components/AppIcon.vue'
 import AsyncPanel from '../components/AsyncPanel.vue'
@@ -27,7 +28,7 @@ const tabs = {
   'operation-logs': '操作日志',
 }
 // 尚未提供后端接口的管理模块：先标注“暂未开放”，不作为可用功能展示。
-const pendingSections = ['complaints', 'users', 'transactions', 'operation-logs']
+const pendingSections = ['users', 'operation-logs']
 const statuses = computed(
   () =>
     ({
@@ -57,6 +58,7 @@ const { items, total, page, size, loading, error, reload } = usePaged(
 )
 function switchSection(value) {
   if (pendingSections.includes(value)) return
+  selected.value = null
   status.value =
     { 'cancellation-requests': 'PENDING_ADMIN', appeals: 'PENDING', complaints: 'PENDING' }[
       value
@@ -131,11 +133,11 @@ const labelForStatus = (value) => statuses.value[value] ?? value
         <template v-if="section === 'transactions'">
           <label class="inline-field">
             用户编号
-            <input v-model="userId" placeholder="全部用户" />
+            <input v-model="userId" inputmode="numeric" maxlength="19" placeholder="全部用户" />
           </label>
           <label class="inline-field">
             任务编号
-            <input v-model="taskId" placeholder="全部任务" />
+            <input v-model="taskId" maxlength="36" placeholder="全部任务" />
           </label>
         </template>
         <template v-if="section === 'operation-logs'">
@@ -220,6 +222,57 @@ const labelForStatus = (value) => statuses.value[value] ?? value
                 </tr>
               </tbody>
             </template>
+            <template v-else-if="section === 'complaints'">
+              <thead>
+                <tr>
+                  <th>记录 / 关联任务</th>
+                  <th>投诉内容与处理记录</th>
+                  <th>投诉人 / 被投诉人</th>
+                  <th>状态</th>
+                  <th>提交 / 处理时间</th>
+                  <th>处理</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in items" :key="item.complaintId">
+                  <td>
+                    <strong>#{{ item.complaintId }}</strong>
+                    <RouterLink
+                      v-if="item.taskId"
+                      class="text-link small"
+                      :to="{ name: 'task-detail', params: { taskId: item.taskId } }"
+                    >
+                      任务 #{{ item.taskId }}
+                    </RouterLink>
+                  </td>
+                  <td class="record-description preserve-lines">
+                    <strong>{{ item.category }}</strong>
+                    <p>{{ item.description }}</p>
+                    <small v-if="item.actions?.length">
+                      {{ item.actions.map((action) => complaintActions[action] || action).join('、') }}
+                    </small>
+                    <small v-if="item.decisionNote">处理说明：{{ item.decisionNote }}</small>
+                    <small v-if="item.handledBy">处理管理员 #{{ item.handledBy }}</small>
+                  </td>
+                  <td>{{ item.reporterId }} / {{ item.targetUserId || '—' }}</td>
+                  <td>{{ labelForStatus(item.status) }}</td>
+                  <td>
+                    {{ formatDate(item.createdAt) }}
+                    <small v-if="item.handledAt">{{ formatDate(item.handledAt) }}</small>
+                  </td>
+                  <td>
+                    <button
+                      v-if="canHandle(item)"
+                      class="button secondary small"
+                      @click="selected = item"
+                    >
+                      处理
+                    </button>
+                    <span v-else class="small muted">已处理</span>
+                  </td>
+                </tr>
+              </tbody>
+            </template>
             <template v-else-if="section === 'transactions'">
               <thead>
                 <tr>
@@ -236,7 +289,17 @@ const labelForStatus = (value) => statuses.value[value] ?? value
                     #{{ item.transactionId }}
                     <small v-if="item.appealId">申诉 #{{ item.appealId }}</small>
                   </td>
-                  <td>{{ item.userId || '—' }} / {{ item.taskId || '—' }}</td>
+                  <td>
+                    用户 #{{ item.userId }}
+                    <RouterLink
+                      v-if="item.taskId"
+                      class="text-link small"
+                      :to="{ name: 'task-detail', params: { taskId: item.taskId } }"
+                    >
+                      任务 #{{ item.taskId }}
+                    </RouterLink>
+                    <small v-else>无关联任务</small>
+                  </td>
                   <td>{{ transactionTypes[item.type] || item.type }}</td>
                   <td class="align-right">
                     <strong :class="item.amount > 0 ? 'positive' : 'negative'">

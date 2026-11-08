@@ -29,7 +29,7 @@ npm run dev
 
 默认 `/api`、`/actuator` 代理到 `http://localhost:8080`。参考 `.env.example` 配置被 Git 忽略的 `.env.development.local`；保留 `.env.apifox` 的专用目标。改环境变量后重启 Vite。
 
-生产构建默认使用同源 `/api/v1`，部署时反向代理 API，并为前端路由配置 SPA fallback。仅在确需跨域部署、且服务端已配置带凭据 CORS 时设置 `VITE_API_BASE_URL`。真实认证接口还需组长后端接入；本次整合没有改动后端认证或业务契约。
+生产构建默认使用同源 `/api/v1`，部署时反向代理 API，并为前端路由配置 SPA fallback。仅在确需跨域部署、且服务端已配置带凭据 CORS 时设置 `VITE_API_BASE_URL`。认证使用现有 Spring Security Session 和 CSRF；管理接口还会在服务端检查管理员角色。
 
 ## 共用路由
 
@@ -42,7 +42,7 @@ npm run dev
 | `/wallet`             | 可用/冻结余额，本人流水、类型筛选、关联任务与申诉编号                |
 | `/notifications`      | 全部/未读通知、单条已读、关联任务跳转                                |
 | `/disputes`           | 按申请编号应答取消，可用 `?requestId=...` 预填                       |
-| `/admin`              | 取消/申诉裁决、投诉处理、用户/任务/流水/日志查询，仅管理员可访问     |
+| `/admin`              | 取消/申诉裁决、投诉处理留痕、任务与交易流水查询；用户/日志查询暂未开放，仅管理员可访问 |
 
 根路径进入 A 的 `/tasks`。所有业务路由共用 A 的认证守卫。我的任务中的接单入口进入任务大厅；详情沿用 `/my-tasks/:taskId`，兼容已有 B 链接。
 
@@ -70,7 +70,7 @@ npm run dev
 2. **任务上的活动取消争议**：`Task` 未返回活动取消申请或冻结标记；重新打开页面时，前端无法精确禁用争议中的送达/验收，服务端必须重新校验。
 3. **异常任务处理**：无异常队列、强制关闭/转派等业务接口，未添加通用改状态入口或模拟成功。
 4. **管理端任务范围**：复用 `GET /tasks` 的状态/关键字参数；全量可见范围、发布者及时间查询仍须后端明确。
-5. **投诉扩展**：图片上传、功能限制期限、第二管理员复核缺少完整契约；扣分依据记录在既有 `decisionNote` 中，未新增字段。
+5. **投诉处罚扩展**：当前开放投诉处理留痕，保存处理方式、说明、管理员和时间；提醒与线下移交需另行完成。扣信用分、账务调整、功能限制、冻结账号的选项禁用，后端也拒绝相应请求；图片上传、限制期限、第二管理员复核后续补齐。
 6. **时间筛选与全部已读**：任务历史日期、钱包/管理查询日期、通知全部已读等尚无完整参数/接口，不用单页数据伪造全局结果。
 7. **详情补充信息**：参与者联系方式、完整状态日志、送达/完成时间需要后端进一步对齐。
 
@@ -81,7 +81,9 @@ npm test
 npm run build
 ```
 
-Node 测试覆盖既有业务规则、认证响应与 Cookie 请求约定、CSRF 轮换、会话单请求复用、401 的 `null` 约定、登录/退出竞态和安全返回路径。
+Node 测试覆盖既有业务规则、认证响应与 Cookie 请求约定、CSRF 轮换、会话单请求复用、401 的 `null` 约定、登录/退出竞态和安全返回路径；另验证投诉留痕校验、筛选与每页条数变更回首页、末页记录处理后的页码修正，以及旧列表请求取消。
+
+管理端投诉和流水标签已接通真实接口。流水查询支持用户编号和任务编号精确筛选，留空表示全部，同时填写取交集。列表采用 0 起始页码与 10/20/50 条分页；修改筛选或每页条数返回首页，投诉处理后自动刷新，末页消失时请求最后一个有效页。已处理投诉展示原处理记录，不再提供处理按钮。
 
 启动 `dev:demo` 后可用 Playwright CLI 执行以下场景。`browser-smoke.js` 拦截该浏览器的 `/api/v1` 验证 B 的固定成功/失败场景；`auth-browser-smoke.js` 使用 A 的真实本地认证接口与 Cookie，仅对 B 的业务接口提供固定响应。运行在测试浏览器中，不访问真实用户账务。
 
@@ -89,6 +91,9 @@ Node 测试覆盖既有业务规则、认证响应与 Cookie 请求约定、CSRF
 npx --yes --package @playwright/cli playwright-cli -s=frontend-b open http://127.0.0.1:5173/my-tasks
 npx --yes --package @playwright/cli playwright-cli -s=frontend-b run-code --filename tests/browser-smoke.js
 npx --yes --package @playwright/cli playwright-cli -s=frontend-b run-code --filename tests/auth-browser-smoke.js
+npx --yes --package @playwright/cli playwright-cli -s=frontend-b run-code --filename tests/admin-browser-smoke.js
 ```
 
-可用 `--config` 指定已安装的浏览器。截图位于被 Git 忽略的 `output/playwright/`；最终仍须接真实后端验证 Session、事务、并发、幂等和权限。
+`admin-browser-smoke.js` 在独立浏览器场景内拦截接口，覆盖投诉处理、未开放处罚、并发冲突提示、流水交集筛选、分页、空结果、重试和移动端布局，不向实际用户数据发送写请求。
+
+可用 `--config` 指定已安装的浏览器。截图位于被 Git 忽略的 `output/playwright/`；真实后端的 Session、事务、并发、幂等和权限另由后端集成测试与 PostgreSQL 联调验证。
