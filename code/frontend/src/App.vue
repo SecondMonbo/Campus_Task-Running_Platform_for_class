@@ -26,6 +26,7 @@ const navigation = [
   { to: '/wallet', icon: 'wallet', title: '钱包与流水' },
   { to: '/notifications', icon: 'bell', title: '通知中心' },
   { to: '/disputes', icon: 'dispute', title: '取消与申诉' },
+  { to: '/profile', icon: 'user', title: '个人中心' },
 ]
 const unread = useResource(
   async (signal) => {
@@ -171,13 +172,13 @@ async function logout() {
             <AppIcon name="bell" />
             <span v-if="unread.data.value > 0" class="notification-dot" />
           </RouterLink>
-          <div class="user-profile">
+          <RouterLink to="/profile" class="user-profile" aria-label="打开个人中心">
             <span class="avatar">{{ session?.displayName?.slice(0, 1) || '同' }}</span>
             <div>
               <strong>{{ session?.displayName || '校园用户' }}</strong>
               <small>{{ session.role === 'ADMIN' ? '管理员' : '校园成员' }}</small>
             </div>
-          </div>
+          </RouterLink>
           <button class="button text-button logout-button" :disabled="signingOut" @click="logout">
             {{ signingOut ? '正在退出…' : '退出登录' }}
           </button>

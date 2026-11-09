@@ -23,6 +23,7 @@ const titles = {
   cancel: '申请取消任务',
   appeal: '提交任务申诉',
   complain: '提交投诉',
+  report: '举报非法任务',
 }
 const copy = {
   accept: '接取后请按约定完成任务；你可以在“我接取的”中查看执行进度。',
@@ -34,6 +35,7 @@ const copy = {
   cancel: '申请提交后由对方应答，任务不会立即取消。对方拒绝后将转管理员裁决。',
   appeal: '申诉不会撤销任务完成状态或原结算。每位参与者对同一任务最多提交一次。',
   complain: '请如实描述任务中的问题，提交后由管理员处理。',
+  report: '发现任务含违规或违法内容？举报将提交给平台管理员核实，恶意举报可能影响账号信用。',
 }
 function toLocalInput(iso) {
   const date = new Date(iso)
@@ -93,7 +95,7 @@ async function submit() {
     error.value = '请填写取消原因。'
     return
   }
-  if (['appeal', 'complain'].includes(action.value) && !form.value.description.trim()) {
+  if (['appeal', 'complain', 'report'].includes(action.value) && !form.value.description.trim()) {
     error.value = '请填写具体说明。'
     return
   }
@@ -138,6 +140,14 @@ async function submit() {
         category: form.value.category,
         description: form.value.description.trim(),
       })
+    // 举报非法任务：复用同一个 complaint 接口，仅关联任务、不指定被投诉用户，
+    // 因此任意登录用户均可提交（后端按“任务内容举报”受理）。
+    if (kind === 'report')
+      result = await api.complain({
+        taskId: props.task.taskId,
+        category: form.value.category,
+        description: form.value.description.trim(),
+      })
     const messages = {
       accept: '接单成功。',
       deliver: '已送达，等待发布者验收。',
@@ -148,6 +158,7 @@ async function submit() {
       cancel: '取消申请已提交。',
       appeal: '申诉已提交，等待管理员处理。',
       complain: '投诉已提交，等待管理员处理。',
+      report: '举报已提交，管理员将尽快核实。',
     }
     receipt.value =
       kind === 'cancel'
@@ -156,9 +167,11 @@ async function submit() {
           ? { label: '申诉编号', id: result.appealId }
           : kind === 'complain'
             ? { label: '投诉编号', id: result.complaintId }
-            : kind === 'review'
-              ? { label: '评价编号', id: result.reviewId }
-              : null
+            : kind === 'report'
+              ? { label: '举报编号', id: result.complaintId }
+              : kind === 'review'
+                ? { label: '评价编号', id: result.reviewId }
+                : null
     notify(messages[kind])
     action.value = ''
     changed()
@@ -206,6 +219,9 @@ async function submit() {
       </button>
       <button v-if="permissions.complain" class="button text-button" @click="open('complain')">
         投诉
+      </button>
+      <button v-if="permissions.report" class="button text-button" @click="open('report')">
+        举报任务
       </button>
     </template>
   </div>
@@ -342,6 +358,28 @@ async function submit() {
             maxlength="2000"
             rows="4"
             placeholder="请描述事情经过"
+          />
+        </label>
+      </template>
+      <template v-if="action === 'report'">
+        <label class="field">
+          举报类型
+          <select v-model="form.category" required>
+            <option disabled value="">请选择类型</option>
+            <option>违规内容</option>
+            <option>虚假信息</option>
+            <option>违法违规</option>
+            <option>其他</option>
+          </select>
+        </label>
+        <label class="field">
+          举报说明
+          <textarea
+            v-model="form.description"
+            required
+            maxlength="2000"
+            rows="4"
+            placeholder="请说明该任务违规或违法的具体内容"
           />
         </label>
       </template>

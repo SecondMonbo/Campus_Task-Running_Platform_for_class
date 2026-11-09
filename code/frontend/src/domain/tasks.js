@@ -62,7 +62,31 @@ export function taskPermissions(task, user, now = Date.now()) {
     cancel: participant && ['IN_PROGRESS', 'WAITING_FOR_ACCEPTANCE'].includes(task.status),
     appeal: participant && task.status === 'COMPLETED',
     complain: participant && task.runnerId != null,
+    // 任意登录用户都可以直接举报非法任务（违规内容、虚假信息等），不限于任务参与者。
+    report: Boolean(user),
   }
+}
+
+/** 校验个人资料编辑表单，规则与 openapi 的 UpdateProfileRequest 保持一致。 */
+export function validateProfileDraft({ displayName, phone }) {
+  const name = typeof displayName === 'string' ? displayName.trim() : ''
+  if (!name) return '请填写显示名。'
+  if (name.length > 50) return '显示名不能超过 50 个字符。'
+  const phoneValue = typeof phone === 'string' ? phone.trim() : ''
+  if (phoneValue.length > 30) return '手机号不能超过 30 个字符。'
+  if (phoneValue && !/^[0-9+\-\s]+$/.test(phoneValue))
+    return '手机号只能包含数字、空格、+ 或 -。'
+  return ''
+}
+
+/** 校验修改密码表单，规则与 openapi 的 ChangePasswordRequest 保持一致。 */
+export function validatePasswordChange({ currentPassword, newPassword, confirmPassword }) {
+  if (!currentPassword) return '请填写当前密码。'
+  if (!newPassword) return '请填写新密码。'
+  if (newPassword.length < 8 || newPassword.length > 128) return '新密码长度需为 8-128 位。'
+  if (newPassword === currentPassword) return '新密码不能与当前密码相同。'
+  if (newPassword !== confirmPassword) return '两次输入的新密码不一致。'
+  return ''
 }
 
 export function validateCancellationRuling(

@@ -42,15 +42,19 @@ public class ComplaintService {
 		if (taskId != null) {
 			var task = taskRepository.findById(taskId)
 					.orElseThrow(() -> new TaskException(ErrorCode.RESOURCE_NOT_FOUND, "关联任务不存在"));
-			if (!Objects.equals(task.getPublisherId(), reporter.userId())
-					&& !Objects.equals(task.getRunnerId(), reporter.userId())) {
-				throw new TaskException(ErrorCode.FORBIDDEN, "仅任务参与者可以提交关联投诉");
+			boolean participant = Objects.equals(task.getPublisherId(), reporter.userId())
+					|| Objects.equals(task.getRunnerId(), reporter.userId());
+			if (participant) {
+				Long counterpart = Objects.equals(task.getPublisherId(), reporter.userId())
+						? task.getRunnerId() : task.getPublisherId();
+				if (targetId == null) targetId = counterpart;
+				if (targetId != null && !targetId.equals(counterpart)) {
+					throw new TaskException(ErrorCode.VALIDATION_ERROR, "被投诉人必须是任务另一位参与者");
+				}
 			}
-			Long counterpart = Objects.equals(task.getPublisherId(), reporter.userId())
-					? task.getRunnerId() : task.getPublisherId();
-			if (targetId == null) targetId = counterpart;
-			if (targetId != null && !targetId.equals(counterpart)) {
-				throw new TaskException(ErrorCode.VALIDATION_ERROR, "被投诉人必须是任务另一位参与者");
+			else if (targetId != null) {
+				// 非参与者可以针对任务内容本身举报，但不能指定被投诉用户。
+				throw new TaskException(ErrorCode.FORBIDDEN, "非任务参与者只能举报任务内容，不能指定被投诉用户");
 			}
 		}
 		if (Objects.equals(targetId, reporter.userId())) {

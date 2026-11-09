@@ -22,6 +22,9 @@ export const api = {
     return user
   },
   myTasks: (query, signal) => page('/users/me/tasks', query, signal),
+  profile: (signal) => get('/users/me/profile', undefined, signal),
+  updateProfile: (body) => client.request('/users/me', { method: 'PATCH', body }),
+  changePassword: (body) => post('/users/me/password', body),
   tasks: (query, signal) => page('/tasks', query, signal),
   task: (taskId, signal) => get(`/tasks/${id(taskId)}`, undefined, signal),
   createTask: (body) => post('/tasks', body),

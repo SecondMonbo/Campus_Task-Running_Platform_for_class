@@ -18,6 +18,7 @@ const paths = {
   inbox: 'M3 13h5l2 3h4l2-3h5M3 13l3-9h12l3 9v7H3z',
   plus: 'M12 5v14M5 12h14',
   campus: 'm2 9 10-6 10 6-10 6zM6 12v6l6 3 6-3v-6M22 9v9',
+  user: 'M20 21a8 8 0 0 0-16 0M17 8a5 5 0 1 1-10 0 5 5 0 0 1 10 0Z',
 }
 </script>
 
