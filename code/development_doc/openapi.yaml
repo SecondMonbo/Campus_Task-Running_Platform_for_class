@@ -193,6 +193,79 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /api/v1/users/me/profile:
+    get:
+      tags: [Users]
+      summary: 查看本人资料（含信誉分展示预留字段）
+      operationId: getMyProfile
+      responses:
+        '200':
+          description: 当前用户资料
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/users/me:
+    patch:
+      tags: [Users]
+      summary: 编辑本人资料
+      description: 仅允许修改显示名和手机号；账号名、角色不可修改。身份取自登录会话。
+      operationId: updateMyProfile
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: 资料已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/users/me/password:
+    post:
+      tags: [Users]
+      summary: 修改本人密码
+      description: 需提供当前密码；新密码需为 8-128 位且不能与当前密码相同。
+      operationId: changeMyPassword
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: 密码已修改
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyDataResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
   /api/v1/tasks:
     get:
       tags: [Tasks]
@@ -1300,6 +1373,71 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/User'
+
+    UserProfile:
+      type: object
+      required: [userId, username, displayName, role, reviewCount]
+      properties:
+        userId:
+          type: string
+        username:
+          type: string
+        displayName:
+          type: string
+        phone:
+          type: [string, 'null']
+        role:
+          $ref: '#/components/schemas/UserRole'
+        createdAt:
+          type: string
+          format: date-time
+        rating:
+          type: [number, 'null']
+          description: 作为跑腿员收到的任务评价平均分（保留一位小数）；无评价时为 null。
+        reviewCount:
+          type: integer
+          minimum: 0
+          description: 收到的任务评价数量。
+        creditScore:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 100
+          description: 信誉分预留字段；信誉分机制上线前为 null。
+
+    UserProfileResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/UserProfile'
+
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        phone:
+          type: [string, 'null']
+          maxLength: 30
+          pattern: '^[0-9+\-\s]*$'
+
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          maxLength: 128
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 128
 
     Task:
       type: object

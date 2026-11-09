@@ -78,4 +78,15 @@ public class AppUser {
 	public Instant getCreatedAt() {
 		return createdAt;
 	}
+
+	/** 用户中心：更新个人资料。显示名与手机号由调用方完成校验和清洗。 */
+	public void updateProfile(String displayName, String phone) {
+		this.displayName = displayName;
+		this.phone = phone;
+	}
+
+	/** 用户中心：更新密码哈希，明文校验与编码由调用方负责。 */
+	public void updatePasswordHash(String passwordHash) {
+		this.passwordHash = passwordHash;
+	}
 }

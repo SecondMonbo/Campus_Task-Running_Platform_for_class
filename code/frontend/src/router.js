@@ -4,6 +4,12 @@ import { safeDestination } from './domain/auth.js'
 
 export const frontendBRoutes = [
   {
+    path: '/profile',
+    name: 'profile',
+    component: () => import('./views/ProfileView.vue'),
+    meta: { title: '个人中心' },
+  },
+  {
     path: '/my-tasks',
     name: 'my-tasks',
     component: () => import('./views/MyTasksView.vue'),
