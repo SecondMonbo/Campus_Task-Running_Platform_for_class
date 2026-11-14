@@ -33,14 +33,15 @@ public class NotificationController {
         this.currentUserService = currentUserService;
     }
 
-    // 查询本人通知
+    // 查询本人通知；type 省略表示全部，TASK 为任务通知，SYSTEM 为系统通知
     @GetMapping("/notifications")
     public ApiResponse<PageResult<NotificationView>> listNotifications(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(defaultValue = "false") boolean unreadOnly) {
+            @RequestParam(defaultValue = "false") boolean unreadOnly,
+            @RequestParam(required = false) NotificationType type) {
         resolvePaging(page, size);
-        return ApiResponse.ok(notificationService.listForUser(current(), page, size, unreadOnly));
+        return ApiResponse.ok(notificationService.listForUser(current(), page, size, unreadOnly, type));
     }
 
     // 标记通知已读

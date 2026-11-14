@@ -1,19 +1,32 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/index.js'
 import { changed, notify, usePaged } from '../composables/state.js'
 import { formatDate } from '../domain/tasks.js'
+import { notificationTypes } from '../domain/notifications.js'
 import AppIcon from '../components/AppIcon.vue'
 import AsyncPanel from '../components/AsyncPanel.vue'
 import PageControls from '../components/PageControls.vue'
 const router = useRouter()
 const unreadOnly = ref(false)
+const type = ref('')
 const busy = ref(new Set())
 const { items, total, page, size, loading, error, reload } = usePaged(
   (pagination, signal) =>
-    api.notifications({ ...pagination, unreadOnly: unreadOnly.value }, signal),
-  [unreadOnly],
+    api.notifications(
+      {
+        ...pagination,
+        unreadOnly: unreadOnly.value,
+        ...(type.value ? { type: type.value } : {}),
+      },
+      signal,
+    ),
+  [unreadOnly, type],
+)
+const emptyText = computed(
+  () =>
+    ({ TASK: '暂无任务通知', SYSTEM: '暂无系统通知' })[type.value] || '暂无通知',
 )
 async function open(item, navigate = true) {
   if (busy.value.has(item.notificationId)) return
@@ -49,30 +62,39 @@ async function open(item, navigate = true) {
       </button>
     </div>
     <section class="panel">
-      <div class="panel-heading">
-        <div class="segmented">
-          <button
-            :class="{ active: !unreadOnly }"
-            :aria-pressed="!unreadOnly"
-            @click="unreadOnly = false"
-          >
-            全部通知
+      <div class="panel-heading notification-heading">
+        <div class="segmented" role="group" aria-label="通知类型">
+          <button :class="{ active: type === '' }" :aria-pressed="type === ''" @click="type = ''">
+            全部
           </button>
           <button
-            :class="{ active: unreadOnly }"
-            :aria-pressed="unreadOnly"
-            @click="unreadOnly = true"
+            :class="{ active: type === 'TASK' }"
+            :aria-pressed="type === 'TASK'"
+            @click="type = 'TASK'"
           >
-            仅看未读
+            任务通知
+          </button>
+          <button
+            :class="{ active: type === 'SYSTEM' }"
+            :aria-pressed="type === 'SYSTEM'"
+            @click="type = 'SYSTEM'"
+          >
+            系统通知
           </button>
         </div>
-        <span class="small muted">点击查看后标记为已读</span>
+        <button
+          class="button secondary small"
+          :aria-pressed="unreadOnly"
+          @click="unreadOnly = !unreadOnly"
+        >
+          {{ unreadOnly ? '取消只看未读' : '仅看未读' }}
+        </button>
       </div>
       <AsyncPanel
         :loading="loading"
         :error="error"
         :empty="!items.length"
-        empty-text="暂无通知"
+        :empty-text="emptyText"
         @retry="reload"
       >
         <div class="notification-list">
@@ -80,12 +102,17 @@ async function open(item, navigate = true) {
             v-for="item in items"
             :key="item.notificationId"
             class="notification-item"
-            :class="{ unread: !item.read }"
+            :class="{ unread: !item.read, system: item.type === 'SYSTEM' }"
           >
-            <span class="notification-icon"><AppIcon name="bell" :size="20" /></span>
+            <span class="notification-icon" :class="{ system: item.type === 'SYSTEM' }">
+              <AppIcon :name="item.type === 'SYSTEM' ? 'megaphone' : 'bell'" :size="20" />
+            </span>
             <div class="notification-content">
               <div>
                 <h3>{{ item.title }}</h3>
+                <span class="notification-kind" :class="item.type">
+                  {{ notificationTypes[item.type] || item.type }}
+                </span>
                 <span v-if="!item.read" class="unread-label">未读</span>
               </div>
               <p>{{ item.content }}</p>

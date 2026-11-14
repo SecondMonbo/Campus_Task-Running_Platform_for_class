@@ -2,6 +2,8 @@ package edu.campus.taskplatform.notification;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
@@ -22,6 +24,10 @@ public class Notification {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private NotificationType type;
+
     @Column(nullable = false, length = 100)
     private String title;
 
@@ -40,10 +46,11 @@ public class Notification {
     protected Notification() {
     }
 
-    public Notification(String notificationId, Long userId, String title, String content,
-                        String relatedTaskId, Instant createdAt) {
+    public Notification(String notificationId, Long userId, NotificationType type, String title,
+                        String content, String relatedTaskId, Instant createdAt) {
         this.notificationId = notificationId;
         this.userId = userId;
+        this.type = type;
         this.title = title;
         this.content = content;
         this.relatedTaskId = relatedTaskId;
@@ -57,6 +64,10 @@ public class Notification {
 
     public Long getUserId() {
         return userId;
+    }
+
+    public NotificationType getType() {
+        return type;
     }
 
     public String getTitle() {
