@@ -38,6 +38,7 @@ export const api = {
   transactions: (query, signal) => page('/wallet/transactions', query, signal),
   notifications: (query, signal) => page('/notifications', query, signal),
   readNotification: (notificationId) => post(`/notifications/${id(notificationId)}/read`),
+  publishSystemNotification: (body) => post('/admin/notifications', body),
   cancel: (taskId, body) => post(`/tasks/${id(taskId)}/cancellation-requests`, body),
   respondCancellation: (requestId, body) =>
     post(`/cancellation-requests/${id(requestId)}/response`, body),
