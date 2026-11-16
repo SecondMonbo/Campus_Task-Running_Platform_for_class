@@ -627,7 +627,7 @@ paths:
     post:
       tags: [Cancellations]
       summary: 应答取消申请
-      description: 被申请方可同意或拒绝；拒绝后申请转入待管理员处理，任务状态保持不变。
+      description: 被申请方可同意或拒绝；拒绝后申请转入待管理员处理，任务状态保持不变。应答须提供责任方：REQUESTER、RESPONDER 或 NONE；拒绝时必须为 NONE。
       operationId: respondToCancellationRequest
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
@@ -691,7 +691,7 @@ paths:
     post:
       tags: [Cancellations, Admin]
       summary: 管理员裁决取消争议
-      description: 仅 ADMIN 角色可访问；处理关联任务仍未完成的待管理员处理申请，裁决和必要账务操作须原子提交。
+      description: 仅 ADMIN 角色可访问；处理关联任务仍未完成的待管理员处理申请，裁决和必要账务操作须原子提交。须明确责任方 REQUESTER、RESPONDER 或 NONE；SUPPORT_CONTINUE 必须为 NONE。责任判定独立于退款和跑腿员所得金额。
       operationId: arbitrateCancellationRequest
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
@@ -1740,22 +1740,30 @@ components:
     CancellationResponseRequest:
       type: object
       additionalProperties: false
-      required: [decision]
+      required: [decision, responsibleParty]
       properties:
         decision:
           type: string
           enum: [APPROVE, REJECT]
+        responsibleParty:
+          type: string
+          enum: [REQUESTER, RESPONDER, NONE]
+          description: 对应取消申请的申请人、被申请人或双方无责。REJECT 时必须为 NONE。
         note:
           type: string
           maxLength: 500
     CancellationArbitrationRequest:
       type: object
       additionalProperties: false
-      required: [ruling, refundAmount, runnerAmount, rulingDetail]
+      required: [ruling, refundAmount, runnerAmount, responsibleParty, rulingDetail]
       properties:
         ruling:
           type: string
           enum: [SUPPORT_REQUESTER_CANCEL, SUPPORT_CONTINUE, CANCEL_PROPORTIONALLY]
+        responsibleParty:
+          type: string
+          enum: [REQUESTER, RESPONDER, NONE]
+          description: 对应取消申请的申请人、被申请人或双方无责。必须与裁决事实一致，且不得从退款或跑腿员所得金额推断；SUPPORT_CONTINUE 时必须为 NONE。
         refundAmount:
           type: integer
           minimum: 0
