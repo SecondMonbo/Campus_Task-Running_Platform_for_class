@@ -835,6 +835,13 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [TASK, SYSTEM]
+          description: 通知类型；省略表示全部。TASK 为任务进度通知，SYSTEM 为管理员发布的系统通知。
       responses:
         '200':
           description: 分页通知
@@ -990,6 +997,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/notifications:
+    post:
+      tags: [Notifications, Admin]
+      summary: 管理员发布系统通知
+      description: 仅 ADMIN 可访问；为当前全部已注册用户各写入一条 SYSTEM 类型通知，统一发布时间。系统通知不关联任务，与任务进度通知通过 type 区分；用户各自维护已读状态。
+      operationId: publishSystemNotification
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemNotificationRequest'
+      responses:
+        '201':
+          description: 系统通知已发布
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemNotificationPublishResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1840,10 +1877,14 @@ components:
 
     Notification:
       type: object
-      required: [notificationId, title, content, read, createdAt]
+      required: [notificationId, type, title, content, read, createdAt]
       properties:
         notificationId:
           type: string
+        type:
+          type: string
+          enum: [TASK, SYSTEM]
+          description: TASK 为任务进度通知，SYSTEM 为管理员发布的系统通知。
         title:
           type: string
         content:
@@ -1869,6 +1910,35 @@ components:
                       type: array
                       items:
                         $ref: '#/components/schemas/Notification'
+
+    SystemNotificationRequest:
+      type: object
+      additionalProperties: false
+      required: [title, content]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 100
+        content:
+          type: string
+          minLength: 1
+          maxLength: 500
+    SystemNotificationPublishResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [recipientCount, publishedAt]
+              properties:
+                recipientCount:
+                  type: integer
+                  minimum: 0
+                publishedAt:
+                  type: string
+                  format: date-time
 
     CreateComplaintRequest:
       type: object

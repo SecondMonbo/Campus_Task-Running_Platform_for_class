@@ -33,15 +33,23 @@ public class NotificationService {
     }
 
     /**
-     * 分页查询本人通知，支持仅看未读。
+     * 分页查询本人通知，支持仅看未读与按类型筛选。
+     * type 为 null 表示全部类型。
      */
     public PageResult<NotificationView> listForUser(CurrentUser user, int page, int size,
-                                                    boolean unreadOnly) {
+                                                    boolean unreadOnly, NotificationType type) {
         Pageable pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "createdAt", "notificationId"));
-        Page<Notification> result = unreadOnly
-                ? repository.findByUserIdAndReadFalse(user.userId(), pageable)
-                : repository.findByUserId(user.userId(), pageable);
+        Page<Notification> result;
+        if (type == null) {
+            result = unreadOnly
+                    ? repository.findByUserIdAndReadFalse(user.userId(), pageable)
+                    : repository.findByUserId(user.userId(), pageable);
+        } else {
+            result = unreadOnly
+                    ? repository.findByUserIdAndTypeAndReadFalse(user.userId(), type, pageable)
+                    : repository.findByUserIdAndType(user.userId(), type, pageable);
+        }
         return PageResult.of(toViews(result.getContent()), page, size, result.getTotalElements());
     }
 
@@ -60,12 +68,12 @@ public class NotificationService {
     }
 
     /**
-     * 写入一条通知。独立事务，失败回滚且不抛给调用方主流程（异常由调用方处理）。
+     * 写入一条任务进度通知。独立事务，失败回滚且不抛给调用方主流程（异常由调用方处理）。
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void notify(Long userId, String title, String content, String relatedTaskId) {
         Notification notification = new Notification(UUID.randomUUID().toString(), userId,
-                title, content, relatedTaskId, Instant.now());
+                NotificationType.TASK, title, content, relatedTaskId, Instant.now());
         repository.save(notification);
     }
 

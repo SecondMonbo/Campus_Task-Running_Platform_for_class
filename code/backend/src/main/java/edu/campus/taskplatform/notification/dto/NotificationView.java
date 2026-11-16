@@ -1,6 +1,7 @@
 package edu.campus.taskplatform.notification.dto;
 
 import edu.campus.taskplatform.notification.Notification;
+import edu.campus.taskplatform.notification.NotificationType;
 
 import java.time.Instant;
 
@@ -11,6 +12,7 @@ import java.time.Instant;
 public class NotificationView {
 
     private String notificationId;
+    private NotificationType type;
     private String title;
     private String content;
     private boolean read;
@@ -20,6 +22,7 @@ public class NotificationView {
     public static NotificationView from(Notification n) {
         NotificationView v = new NotificationView();
         v.notificationId = n.getNotificationId();
+        v.type = n.getType();
         v.title = n.getTitle();
         v.content = n.getContent();
         v.read = n.isRead();
@@ -30,6 +33,10 @@ public class NotificationView {
 
     public String getNotificationId() {
         return notificationId;
+    }
+
+    public NotificationType getType() {
+        return type;
     }
 
     public String getTitle() {

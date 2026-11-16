@@ -1156,6 +1156,9 @@ input[readonly] {
 .notification-item.unread {
   background: #fbfcf9;
 }
+.notification-heading {
+  flex-wrap: wrap;
+}
 .notification-icon {
   background: #f1f5ed;
   color: #70946e;
@@ -1165,6 +1168,22 @@ input[readonly] {
   display: grid;
   place-items: center;
   flex-shrink: 0;
+}
+.notification-icon.system {
+  background: #edf3f8;
+  color: #6f98b4;
+}
+.notification-kind {
+  flex-shrink: 0;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  background: #f4f2de;
+  color: #9d9b63;
+}
+.notification-kind.SYSTEM {
+  background: #edf3f8;
+  color: #5d7fa3;
 }
 .notification-content {
   flex: 1;

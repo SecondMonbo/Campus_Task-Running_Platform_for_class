@@ -5,6 +5,7 @@ import { session, usePaged } from '../composables/state.js'
 import { formatDate, formatNumber, taskStatuses, transactionTypes } from '../domain/tasks.js'
 import { complaintActions } from '../domain/admin.js'
 import AdminDecision from '../components/AdminDecision.vue'
+import SystemNoticeModal from '../components/SystemNoticeModal.vue'
 import AppIcon from '../components/AppIcon.vue'
 import AsyncPanel from '../components/AsyncPanel.vue'
 import PageControls from '../components/PageControls.vue'
@@ -18,6 +19,7 @@ const actorId = ref('')
 const logAction = ref('')
 const filters = ref({})
 const selected = ref(null)
+const noticeOpen = ref(false)
 const tabs = {
   'cancellation-requests': '取消裁决',
   appeals: '任务申诉',
@@ -28,7 +30,7 @@ const tabs = {
   'operation-logs': '操作日志',
 }
 // 尚未提供后端接口的管理模块：先标注“暂未开放”，不作为可用功能展示。
-const pendingSections = ['users', 'operation-logs']
+const pendingSections = ['operation-logs']
 const statuses = computed(
   () =>
     ({
@@ -98,10 +100,16 @@ const labelForStatus = (value) => statuses.value[value] ?? value
         </h1>
         <p class="page-subtitle">处理争议，查询记录，维护任务秩序。</p>
       </div>
-      <button class="button secondary" @click="reload">
-        <AppIcon name="refresh" :size="16" />
-        刷新
-      </button>
+      <div class="heading-actions">
+        <button class="button primary" @click="noticeOpen = true">
+          <AppIcon name="megaphone" :size="16" />
+          发布系统通知
+        </button>
+        <button class="button secondary" @click="reload">
+          <AppIcon name="refresh" :size="16" />
+          刷新
+        </button>
+      </div>
     </div>
     <section class="panel">
       <nav class="filter-tabs admin-tabs" aria-label="管理模块">
@@ -397,5 +405,6 @@ const labelForStatus = (value) => statuses.value[value] ?? value
       />
     </section>
     <AdminDecision v-if="selected" :kind="section" :record="selected" @close="selected = null" />
+    <SystemNoticeModal v-if="noticeOpen" @close="noticeOpen = false" />
   </section>
 </template>
