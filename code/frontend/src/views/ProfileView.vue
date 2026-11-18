@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '../api/index.js'
 import { notify, revision, session, useResource } from '../composables/state.js'
 import { formatDate, validatePasswordChange, validateProfileDraft } from '../domain/tasks.js'
+import { formatCreditDelta } from '../domain/credit.js'
 import AppIcon from '../components/AppIcon.vue'
 import AsyncPanel from '../components/AsyncPanel.vue'
 
@@ -20,6 +21,18 @@ const ratingText = computed(() =>
   Number.isFinite(rating.value) ? rating.value.toFixed(1) : '—',
 )
 const reviewCount = computed(() => profile.data.value?.reviewCount ?? 0)
+
+// 信用分：本人精确分值、档位、权限/恢复说明与变更记录（分页）。
+const creditPage = ref(0)
+const credit = useResource(
+  (signal) => api.myCredit({ page: creditPage.value, size: 10 }, signal),
+  [creditPage, revision],
+)
+const creditRecords = computed(() => credit.data.value?.records?.items ?? [])
+const creditTotal = computed(() => credit.data.value?.records?.total ?? 0)
+const creditPages = computed(() => Math.max(1, Math.ceil(creditTotal.value / 10)))
+const tierClass = computed(() => (credit.data.value?.tier || 'unknown').toLowerCase())
+const deltaText = (value) => formatCreditDelta(value)
 
 function syncDraft() {
   const data = profile.data.value
@@ -133,26 +146,77 @@ async function changePassword() {
         <article class="panel rating-card">
           <div>
             <AppIcon name="shield" :size="22" />
-            <span>信誉评分</span>
+            <span>信用分</span>
+            <span v-if="credit.data.value" class="tier-badge" :class="tierClass">
+              {{ credit.data.value.tierLabel }}
+            </span>
           </div>
           <strong>
-            {{ ratingText }}
+            {{ credit.data.value?.score ?? '—' }}
             <small>分</small>
           </strong>
           <p class="small muted">
-            基于 {{ reviewCount }} 条任务评价统计。
+            0–100 分 · 基于 {{ reviewCount }} 条任务评价，平均 {{ ratingText }} 分
           </p>
-          <dl class="info-grid">
-            <div>
-              <dt>信誉分（0-100）</dt>
-              <dd>{{ profile.data.value.creditScore ?? '待接入' }}</dd>
-            </div>
-          </dl>
-          <p class="notice">
-            评分展示接口已预留；信誉分机制上线后将在此自动展示完整数据。
+          <p v-if="credit.data.value" class="small">{{ credit.data.value.permissionHint }}</p>
+          <p v-if="credit.data.value" class="notice">{{ credit.data.value.recoveryHint }}</p>
+          <p v-if="credit.error.value" class="form-error" role="alert">
+            {{ credit.error.value.message }}
           </p>
         </article>
       </div>
+
+      <section class="panel credit-records-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>信用分变更记录</h2>
+            <p class="small muted">共 {{ creditTotal }} 条，展示最近 10 条为一页。</p>
+          </div>
+          <button class="button secondary" @click="credit.reload">
+            <AppIcon name="refresh" :size="16" />
+            刷新记录
+          </button>
+        </div>
+        <p v-if="credit.loading.value" class="small muted">正在加载信用分记录…</p>
+        <p v-else-if="!creditRecords.length" class="notice">暂无信用分变更记录。</p>
+        <ul v-else class="credit-records">
+          <li v-for="record in creditRecords" :key="record.recordId">
+            <div class="credit-record-main">
+              <strong>{{ record.eventLabel }}</strong>
+              <p class="small muted">{{ record.reason }}</p>
+            </div>
+            <span
+              class="credit-delta"
+              :class="{ positive: record.actualDelta > 0, negative: record.actualDelta < 0 }"
+            >
+              {{ deltaText(record.actualDelta) }}
+            </span>
+            <span class="credit-score-flow">
+              {{ record.scoreBefore ?? '—' }} → {{ record.scoreAfter }}
+            </span>
+            <span class="small muted credit-time">{{ formatDate(record.createdAt) }}</span>
+          </li>
+        </ul>
+        <footer class="credit-pager">
+          <button
+            type="button"
+            class="button secondary"
+            :disabled="creditPage === 0 || credit.loading.value"
+            @click="creditPage -= 1"
+          >
+            上一页
+          </button>
+          <span class="small muted">{{ creditPage + 1 }} / {{ creditPages }}</span>
+          <button
+            type="button"
+            class="button secondary"
+            :disabled="creditPage + 1 >= creditPages || credit.loading.value"
+            @click="creditPage += 1"
+          >
+            下一页
+          </button>
+        </footer>
+      </section>
 
       <div class="profile-forms">
         <form class="panel" @submit.prevent="saveProfile">

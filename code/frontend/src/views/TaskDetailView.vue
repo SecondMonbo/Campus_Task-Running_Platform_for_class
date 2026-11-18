@@ -1,11 +1,12 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api/index.js'
 import { session, useResource } from '../composables/state.js'
 import { formatDate, formatNumber, taskPermissions, taskStatuses } from '../domain/tasks.js'
 import AppIcon from '../components/AppIcon.vue'
 import AsyncPanel from '../components/AsyncPanel.vue'
+import AppModal from '../components/AppModal.vue'
 import TaskActions from '../components/TaskActions.vue'
 const route = useRoute()
 const {
@@ -16,6 +17,15 @@ const {
 } = useResource((signal) => api.task(route.params.taskId, signal), [() => route.params.taskId])
 const permissions = computed(() => (task.value ? taskPermissions(task.value, session.value) : {}))
 const steps = ['WAITING_FOR_TAKER', 'IN_PROGRESS', 'WAITING_FOR_ACCEPTANCE', 'COMPLETED']
+// 他人主页：任务接取界面可查看发布者的基本信息与信用档位（不含精确分值与明细）。
+const publisherOpen = ref(false)
+const publicProfile = useResource(
+  (signal) => (task.value ? api.publicProfile(task.value.publisherId, signal) : Promise.resolve(null)),
+  [() => task.value?.publisherId],
+)
+const publisherTierClass = computed(() =>
+  (publicProfile.data.value?.creditTier || 'unknown').toLowerCase(),
+)
 </script>
 <template>
   <section>
@@ -86,6 +96,10 @@ const steps = ['WAITING_FOR_TAKER', 'IN_PROGRESS', 'WAITING_FOR_ACCEPTANCE', 'CO
                 <dd>{{ task.runnerId || '尚未接取' }}</dd>
               </div>
             </dl>
+            <button class="button secondary" @click="publisherOpen = true">
+              <AppIcon name="user" :size="16" />
+              查看发布者主页
+            </button>
           </article>
           <aside>
             <section class="panel reward-panel">
@@ -125,6 +139,49 @@ const steps = ['WAITING_FOR_TAKER', 'IN_PROGRESS', 'WAITING_FOR_ACCEPTANCE', 'CO
             </p>
           </aside>
         </div>
+
+        <AppModal v-if="publisherOpen" title="发布者主页" @close="publisherOpen = false">
+          <p v-if="publicProfile.loading.value" class="small muted">正在加载发布者信息…</p>
+          <p v-else-if="publicProfile.error.value" class="form-error" role="alert">
+            {{ publicProfile.error.value.message }}
+          </p>
+          <div v-else-if="publicProfile.data.value" class="public-profile">
+            <div class="public-profile-head">
+              <span class="avatar profile-avatar">
+                {{ publicProfile.data.value.displayName?.slice(0, 1) || '同' }}
+              </span>
+              <div>
+                <h3>{{ publicProfile.data.value.displayName }}</h3>
+                <p class="small muted">
+                  {{
+                    publicProfile.data.value.role === 'ADMIN' ? '管理员' : '校园成员'
+                  }}
+                </p>
+              </div>
+            </div>
+            <dl class="info-grid">
+              <div>
+                <dt>信用档位</dt>
+                <dd>
+                  <span class="tier-badge" :class="publisherTierClass">
+                    {{ publicProfile.data.value.creditTierLabel }}
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt>累计完成</dt>
+                <dd>{{ publicProfile.data.value.completedTasks }} 单</dd>
+              </div>
+              <div>
+                <dt>注册时间</dt>
+                <dd>{{ formatDate(publicProfile.data.value.memberSince) }}</dd>
+              </div>
+            </dl>
+            <p class="notice">
+              为保护隐私，他人主页仅展示基本信息与信用档位，不显示精确分值和变更明细。
+            </p>
+          </div>
+        </AppModal>
       </template>
     </AsyncPanel>
   </section>

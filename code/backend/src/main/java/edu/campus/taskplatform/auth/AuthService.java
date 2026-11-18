@@ -5,6 +5,7 @@ import java.time.Instant;
 import edu.campus.taskplatform.accounting.AccountingService;
 import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.common.TaskException;
+import edu.campus.taskplatform.credit.CreditScoreService;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -19,12 +20,14 @@ public class AuthService {
 	private final AppUserRepository userRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final AccountingService accountingService;
+	private final CreditScoreService creditScoreService;
 
 	public AuthService(AppUserRepository userRepository, PasswordEncoder passwordEncoder,
-			AccountingService accountingService) {
+			AccountingService accountingService, CreditScoreService creditScoreService) {
 		this.userRepository = userRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.accountingService = accountingService;
+		this.creditScoreService = creditScoreService;
 	}
 
 	@Transactional
@@ -39,6 +42,8 @@ public class AuthService {
 			throw new TaskException(ErrorCode.DUPLICATE_ACTION, "用户名已被使用");
 		}
 		accountingService.openAccount(user.getUserId(), INITIAL_WALLET_BALANCE);
+		// 新注册用户信用分初始化为 80 分，并写入初始化基线记录。
+		creditScoreService.ensureAccount(user.getUserId());
 		return AuthUserDto.from(user);
 	}
 

@@ -7,6 +7,7 @@ import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.notification.NotificationService;
 import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
+import edu.campus.taskplatform.credit.CreditScoreService;
 import edu.campus.taskplatform.task.dto.CreateReviewRequest;
 import edu.campus.taskplatform.task.dto.TaskCreateRequest;
 import edu.campus.taskplatform.task.dto.TaskUpdateRequest;
@@ -52,17 +53,20 @@ public class TaskService {
     private final TaskReviewRepository reviewRepository;
     private final AccountingService accounting;
     private final NotificationService notificationService;
+    private final CreditScoreService creditScoreService;
 
     public TaskService(TaskRepository taskRepository,
                        TaskOperationLogRepository operationLogRepository,
                        TaskReviewRepository reviewRepository,
                        AccountingService accounting,
-                       NotificationService notificationService) {
+                       NotificationService notificationService,
+                       CreditScoreService creditScoreService) {
         this.taskRepository = taskRepository;
         this.operationLogRepository = operationLogRepository;
         this.reviewRepository = reviewRepository;
         this.accounting = accounting;
         this.notificationService = notificationService;
+        this.creditScoreService = creditScoreService;
     }
 
     // ---------------------------------------------------------------
@@ -247,6 +251,8 @@ public class TaskService {
         task.setDeliveredAt(Instant.now());
         taskRepository.save(task);
         writeLog(taskId, runner.userId(), "DELIVER", "确认送达");
+        // 信用分：送达时间晚于截止 24 小时记 -5；截止后 24 小时内不加不扣（按任务 ID 幂等）。
+        creditScoreService.applyDeliveryOutcome(task);
         safeNotify(task.getPublisherId(), "任务已送达",
                 "「" + task.getTitle() + "」已确认送达，请及时验收。", taskId);
         return TaskView.from(task);
@@ -277,6 +283,8 @@ public class TaskService {
         doSettle(taskId, publisher.userId(), runnerId, reward);
         taskRepository.save(task);
         writeLog(taskId, publisher.userId(), "COMPLETE", "确认完成，报酬=" + reward + " 结算给跑腿员");
+        // 信用分：截止前送达 +1（与评价不互抵）；超时 24 小时以上补记 -5。均按任务 ID 幂等。
+        creditScoreService.applyCompletionOutcome(task);
         safeNotify(runnerId, "任务已完成",
                 "「" + task.getTitle() + "」已完成，报酬 " + reward + " 虚拟币已结算到你的钱包。", taskId);
         return TaskView.from(task);
@@ -299,10 +307,20 @@ public class TaskService {
         if (reviewRepository.existsByTaskIdAndReviewerId(taskId, publisher.userId())) {
             throw new TaskException(ErrorCode.DUPLICATE_ACTION, "该任务已被本人评价过");
         }
+        Instant now = Instant.now();
+        // 信用分规则：同一发布者对同一跑腿员滚动 30 天内只有第一次低星评价扣分；
+        // 需在保存本次评价前统计窗口内已有的低星评价数量。
+        boolean firstLowStar = reviewRepository
+                .countByReviewerIdAndRevieweeIdAndScoreLessThanEqualAndCreatedAtAfter(
+                        publisher.userId(), task.getRunnerId(), 2,
+                        now.minus(CreditScoreService.LOW_STAR_WINDOW)) == 0;
         TaskReview review = new TaskReview(UUID.randomUUID().toString(), taskId,
-                publisher.userId(), task.getRunnerId(), req.getScore(), req.getContent(), Instant.now());
+                publisher.userId(), task.getRunnerId(), req.getScore(), req.getContent(), now);
         reviewRepository.save(review);
         writeLog(taskId, publisher.userId(), "REVIEW", "提交评价");
+        // 信用分：5 星 +2；3–4 星 0；1–2 星首次 -3，其余仅留痕。以评价 ID 幂等。
+        creditScoreService.applyReview(publisher.userId(), task.getRunnerId(), review.getReviewId(),
+                req.getScore(), firstLowStar, task.getTitle());
         safeNotify(task.getRunnerId(), "收到新的评价",
                 "你的任务「" + task.getTitle() + "」收到发布者评价，评分 " + req.getScore() + " 星。", taskId);
         return review;

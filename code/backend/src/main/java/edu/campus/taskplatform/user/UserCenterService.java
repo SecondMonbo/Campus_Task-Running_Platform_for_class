@@ -4,6 +4,7 @@ import edu.campus.taskplatform.auth.AppUser;
 import edu.campus.taskplatform.auth.AppUserRepository;
 import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.common.TaskException;
+import edu.campus.taskplatform.credit.CreditScoreService;
 import edu.campus.taskplatform.task.TaskReviewRepository;
 import edu.campus.taskplatform.user.dto.ChangePasswordRequest;
 import edu.campus.taskplatform.user.dto.UpdateProfileRequest;
@@ -23,15 +24,17 @@ public class UserCenterService {
 	private final AppUserRepository userRepository;
 	private final TaskReviewRepository reviewRepository;
 	private final PasswordEncoder passwordEncoder;
+	private final CreditScoreService creditScoreService;
 
 	public UserCenterService(AppUserRepository userRepository, TaskReviewRepository reviewRepository,
-			PasswordEncoder passwordEncoder) {
+			PasswordEncoder passwordEncoder, CreditScoreService creditScoreService) {
 		this.userRepository = userRepository;
 		this.reviewRepository = reviewRepository;
 		this.passwordEncoder = passwordEncoder;
+		this.creditScoreService = creditScoreService;
 	}
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public UserProfileDto profile(long userId) {
 		return toProfile(requireUser(userId));
 	}
@@ -68,9 +71,8 @@ public class UserCenterService {
 				user.getPhone(), user.getRole().name(), user.getCreatedAt(),
 				average == null ? null : Math.round(average * 10.0) / 10.0,
 				reviewRepository.countByRevieweeId(user.getUserId()),
-				// 信誉分展示接口预留：契约中的 creditScore（0-100）待信誉分机制上线后计算，
-				// 当前返回 null，前端已按占位方式渲染。
-				null);
+				// 信誉分（0-100）：由信用分服务统一维护，未初始化时先补 80 分基线。
+				creditScoreService.scoreOf(user.getUserId()));
 	}
 
 	private static String trimToNull(String value) {
