@@ -6,5 +6,7 @@ package edu.campus.taskplatform.notification;
  */
 public enum NotificationType {
     TASK,
-    SYSTEM
+    SYSTEM,
+    /** 信用分变动通知（非零变动时写入）。 */
+    CREDIT
 }
