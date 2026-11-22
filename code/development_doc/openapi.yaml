@@ -196,7 +196,7 @@ paths:
   /api/v1/users/me/profile:
     get:
       tags: [Users]
-      summary: 查看本人资料（含信誉分展示预留字段）
+      summary: 查看本人资料（含当前信用分与评价统计）
       operationId: getMyProfile
       responses:
         '200':
@@ -1004,6 +1004,213 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /api/v1/users/me/credit:
+    get:
+      tags: [Credit]
+      summary: 查询本人信用分
+      description: 返回本人精确分数、档位、低分限制状态、权限说明、恢复条件与连续履约计数。身份来自登录会话。
+      operationId: getMyCreditSummary
+      responses:
+        '200':
+          description: 本人信用分摘要
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditSummaryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/users/me/credit/records:
+    get:
+      tags: [Credit]
+      summary: 查询本人信用分变更记录
+      operationId: listMyCreditRecords
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 分页变更记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditRecordPageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/users/{userId}/credit:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[1-9][0-9]{0,18}$'
+    get:
+      tags: [Credit, Admin]
+      summary: 管理员查询用户信用分
+      description: 仅 ADMIN 可访问；可查看全部用户的精确分值与限制状态。
+      operationId: getAdminCreditSummary
+      responses:
+        '200':
+          description: 用户信用分摘要
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditSummaryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/users/{userId}/credit/records:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[1-9][0-9]{0,18}$'
+    get:
+      tags: [Credit, Admin]
+      summary: 管理员查询用户信用分记录
+      operationId: listAdminCreditRecords
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 分页变更记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditRecordPageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/users/{userId}/credit-adjustments:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[1-9][0-9]{0,18}$'
+    post:
+      tags: [Credit, Admin]
+      summary: 管理员复核调整信用分
+      description: 仅 ADMIN 可访问；必须填写复核说明，调整后截断在 0–100；保留原记录并追加调整记录。
+      operationId: adjustUserCredit
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditAdjustmentRequest'
+      responses:
+        '200':
+          description: 调整后的信用分摘要
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditSummaryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/task-publication-reviews:
+    get:
+      tags: [Tasks, Admin]
+      summary: 管理员查询发布复核队列
+      description: 仅 ADMIN 可访问；默认返回待复核任务。任务保留原任务状态，发布复核状态独立控制公开可见性。
+      operationId: listTaskPublicationReviews
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TaskPublicationReviewStatus'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 分页发布复核任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskPublicationReviewPageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/admin/task-publication-reviews/{taskId}/decision:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks, Admin]
+      summary: 管理员处理发布复核
+      description: 仅 ADMIN 可访问；批准后任务进入公开待接单列表；驳回后任务转为 CANCELLED 并全额解冻报酬。
+      operationId: decideTaskPublicationReview
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskPublicationReviewDecisionRequest'
+      responses:
+        '200':
+          description: 复核完成后的任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
   /api/v1/admin/notifications:
     post:
       tags: [Notifications, Admin]
@@ -1399,6 +1606,11 @@ components:
           type: integer
           minimum: 0
           maximum: 100
+          description: 管理员用户查询会返回；当前登录用户接口可省略。
+        creditTier:
+          $ref: '#/components/schemas/CreditTier'
+        creditRestricted:
+          type: boolean
         createdAt:
           type: string
           format: date-time
@@ -1436,10 +1648,10 @@ components:
           minimum: 0
           description: 收到的任务评价数量。
         creditScore:
-          type: [integer, 'null']
+          type: integer
           minimum: 0
           maximum: 100
-          description: 信誉分预留字段；信誉分机制上线前为 null。
+          description: 当前信用分；新用户初始化为 80，与钱包虚拟币相互独立。
 
     UserProfileResponse:
       allOf:
@@ -1448,6 +1660,128 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/UserProfile'
+
+    CreditTier:
+      type: string
+      enum: [EXCELLENT, GOOD, WARNING, RESTRICTED]
+      description: 90–100 优秀、75–89 良好、60–74 预警、0–59 受限。
+
+    CreditEventType:
+      type: string
+      enum:
+        - INITIALIZATION
+        - REVIEW_5_STAR
+        - REVIEW_3_4_STAR
+        - REVIEW_LOW_STAR
+        - TASK_COMPLETED_ON_TIME
+        - TASK_COMPLETED_IN_WINDOW
+        - TASK_COMPLETED_LATE
+        - RESPONSIBLE_CANCELLATION
+        - COMPLAINT_UPHELD
+        - CONSECUTIVE_COMPLETION_RECOVERY
+        - ADMIN_REVIEW_ADJUSTMENT
+
+    CreditSummary:
+      type: object
+      required: [userId, score, tier, restricted, canAcceptTasks, publishRequiresReview]
+      properties:
+        userId:
+          type: string
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        tier:
+          $ref: '#/components/schemas/CreditTier'
+        restricted:
+          type: boolean
+          description: 低分限制状态；低于 60 分开启，恢复至 75 分及以上解除。
+        canAcceptTasks:
+          type: boolean
+        publishRequiresReview:
+          type: boolean
+          description: 为 true 时新发布任务进入管理员发布复核队列。
+        consecutiveCompletedTasks:
+          type: integer
+          minimum: 0
+          description: 连续完成且期间没有负向信用事件的任务数。
+        restrictionNotice:
+          type: [string, 'null']
+        recoveryCondition:
+          type: string
+
+    CreditSummaryResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/CreditSummary'
+
+    CreditRecord:
+      type: object
+      required: [recordId, userId, eventType, sourceId, reason, requestedDelta, actualDelta, scoreAfter, createdAt]
+      properties:
+        recordId:
+          type: string
+        userId:
+          type: string
+        eventType:
+          $ref: '#/components/schemas/CreditEventType'
+        sourceId:
+          type: string
+          description: 触发该记录的业务资源编号；初始化记录为 user:<userId>。
+        reason:
+          type: string
+        requestedDelta:
+          type: integer
+        actualDelta:
+          type: integer
+        scoreBefore:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 100
+          description: 初始化基线记录为空。
+        scoreAfter:
+          type: integer
+          minimum: 0
+          maximum: 100
+        adminId:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+
+    CreditRecordPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/CreditRecord'
+
+    CreditAdjustmentRequest:
+      type: object
+      additionalProperties: false
+      required: [delta, reason]
+      properties:
+        delta:
+          type: integer
+          minimum: -100
+          maximum: 100
+          description: 管理员指定的调整值，不能为 0；最终分数截断在 0–100。
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: 复核说明，必填。
 
     UpdateProfileRequest:
       type: object
@@ -1478,7 +1812,7 @@ components:
 
     Task:
       type: object
-      required: [taskId, title, description, reward, deadline, pickupLocation, deliveryLocation, status, publisherId, createdAt]
+      required: [taskId, title, description, reward, deadline, pickupLocation, deliveryLocation, status, publicationReviewStatus, publisherId, createdAt]
       properties:
         taskId:
           type: string
@@ -1499,6 +1833,8 @@ components:
           type: string
         status:
           $ref: '#/components/schemas/TaskStatus'
+        publicationReviewStatus:
+          $ref: '#/components/schemas/TaskPublicationReviewStatus'
         publisherId:
           type: string
         runnerId:
@@ -1506,6 +1842,44 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    TaskPublicationReviewStatus:
+      type: string
+      enum: [NOT_REQUIRED, PENDING_REVIEW, APPROVED, REJECTED]
+      description: >-
+        独立于任务状态的发布复核状态。NOT_REQUIRED/APPROVED 进入公开待接单列表；
+        PENDING_REVIEW 仅发布者与管理员可见；REJECTED 的任务同时转为 CANCELLED。
+
+    TaskPublicationReviewDecision:
+      type: string
+      enum: [APPROVE, REJECT]
+
+    TaskPublicationReviewDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, note]
+      properties:
+        decision:
+          $ref: '#/components/schemas/TaskPublicationReviewDecision'
+        note:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    TaskPublicationReviewPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageInfo'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Task'
 
     CreateTaskRequest:
       type: object
@@ -1725,6 +2099,9 @@ components:
         runnerAmount:
           type: integer
           minimum: 0
+        responsibleParty:
+          type: [string, 'null']
+          description: 取消生效时认定的责任方（REQUESTER/RESPONDER/NONE）；创建申请及待处理阶段为 null。
         createdAt:
           type: string
           format: date-time
@@ -1971,7 +2348,10 @@ components:
           maxLength: 2000
     ComplaintActionRequest:
       type: object
-      description: 当前仅开放处理留痕；处罚动作及调整字段返回 400，投诉保持待处理。
+      description: >-
+        开放 WARNING、LOG_ONLY、OFFLINE_REFERRAL 处理留痕，以及 CREDIT_ADJUSTMENT 信用扣分。
+        使用 CREDIT_ADJUSTMENT 时必须同时提交 -2、-5 或 -10 的 creditAdjustment，且投诉必须指定
+        targetUserId；未选择该动作时 creditAdjustment 必须为空。账务调整、功能限制与冻结账号仍返回 400。
       additionalProperties: false
       required: [actions, decisionNote]
       properties:
@@ -1984,7 +2364,8 @@ components:
             $ref: '#/components/schemas/ComplaintAction'
         creditAdjustment:
           type: integer
-          description: 预留字段，当前不允许提交，提交返回 400。
+          enum: [-2, -5, -10]
+          description: 投诉成立时的信用扣分档位，仅在选择 CREDIT_ADJUSTMENT 时提交；每条投诉最多扣一次。
         financialAdjustment:
           type: integer
           description: 预留字段，当前不允许提交，提交返回 400。
@@ -1998,7 +2379,9 @@ components:
     ComplaintAction:
       type: string
       enum: [WARNING, CREDIT_ADJUSTMENT, FINANCIAL_ADJUSTMENT, FUNCTION_RESTRICTION, ACCOUNT_FREEZE, LOG_ONLY, OFFLINE_REFERRAL]
-      description: 当前仅开放 WARNING（记录提醒与警告）、LOG_ONLY（处理留痕）、OFFLINE_REFERRAL（记录线下移交）；提醒和移交需另行完成，其余处罚暂未开放。
+      description: >-
+        当前开放 WARNING（记录提醒与警告）、LOG_ONLY（处理留痕）、OFFLINE_REFERRAL（记录线下移交）
+        与 CREDIT_ADJUSTMENT（按情节扣 2/5/10 信用分）；账务调整、功能限制和冻结账号仍暂未开放。
     Complaint:
       type: object
       required: [complaintId, reporterId, category, description, status, actions, createdAt]
@@ -2023,6 +2406,9 @@ components:
           items:
             $ref: '#/components/schemas/ComplaintAction'
           description: 已保存的处理方式；待处理时为空。
+        creditAdjustment:
+          type: [integer, 'null']
+          description: 已执行的信用扣分档位（-2/-5/-10）；未扣分时为空。
         decisionNote:
           type: [string, 'null']
         handledBy:

@@ -77,6 +77,17 @@ public class NotificationService {
         repository.save(notification);
     }
 
+    /**
+     * 写入一条不关联任务的系统通知（当前用于信用分与限制状态变化）。
+     * 独立事务，失败不影响信用分主流程。
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void notifySystem(Long userId, String title, String content) {
+        Notification notification = new Notification(UUID.randomUUID().toString(), userId,
+                NotificationType.SYSTEM, title, content, null, Instant.now());
+        repository.save(notification);
+    }
+
     private List<NotificationView> toViews(List<Notification> notifications) {
         List<NotificationView> views = new java.util.ArrayList<>(notifications.size());
         for (Notification n : notifications) {

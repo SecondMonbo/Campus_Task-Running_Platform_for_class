@@ -144,12 +144,12 @@ async function changePassword() {
           </p>
           <dl class="info-grid">
             <div>
-              <dt>信誉分（0-100）</dt>
-              <dd>{{ profile.data.value.creditScore ?? '待接入' }}</dd>
+              <dt>信用分（0-100）</dt>
+              <dd>{{ profile.data.value.creditScore ?? '—' }}</dd>
             </div>
           </dl>
           <p class="notice">
-            评分展示接口已预留；信誉分机制上线后将在此自动展示完整数据。
+            信用分与任务报酬相互独立；低于 60 分进入低分限制，恢复至 75 分解除。
           </p>
         </article>
       </div>

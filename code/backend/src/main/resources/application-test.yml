@@ -9,3 +9,9 @@ spring:
       ddl-auto: none
   flyway:
     enabled: false
+
+credit:
+  events:
+    # 测试由用例显式控制消费时机，避免后台任务干扰断言。
+    auto-process: false
+    retry-enabled: false

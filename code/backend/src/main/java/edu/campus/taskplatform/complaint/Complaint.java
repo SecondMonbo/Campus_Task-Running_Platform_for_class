@@ -53,6 +53,10 @@ public class Complaint {
 	@Column(name = "decision_note", length = 1000)
 	private String decisionNote;
 
+	/** 投诉成立时的信用扣分档位：-2 / -5 / -10；未扣分时为空。 */
+	@Column(name = "credit_adjustment")
+	private Integer creditAdjustment;
+
 	@Column(name = "handled_by")
 	private Long handledBy;
 
@@ -76,9 +80,11 @@ public class Complaint {
 		this.createdAt = Instant.now();
 	}
 
-	public void process(Long adminId, List<ComplaintAction> actions, String decisionNote) {
+	public void process(Long adminId, List<ComplaintAction> actions, Integer creditAdjustment,
+			String decisionNote) {
 		if (status != ComplaintStatus.PENDING) throw new IllegalStateException("投诉已处理");
 		this.actions.addAll(actions);
+		this.creditAdjustment = creditAdjustment;
 		this.decisionNote = decisionNote;
 		this.handledBy = adminId;
 		this.handledAt = Instant.now();
@@ -94,6 +100,7 @@ public class Complaint {
 	public ComplaintStatus getStatus() { return status; }
 	public List<ComplaintAction> getActions() { return List.copyOf(actions); }
 	public String getDecisionNote() { return decisionNote; }
+	public Integer getCreditAdjustment() { return creditAdjustment; }
 	public Long getHandledBy() { return handledBy; }
 	public Instant getHandledAt() { return handledAt; }
 	public Instant getCreatedAt() { return createdAt; }

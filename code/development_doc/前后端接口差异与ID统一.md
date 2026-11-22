@@ -23,16 +23,17 @@
 | 钱包和流水 | `GET /wallet`、`GET /wallet/transactions` | `WalletController`、PostgreSQL 账本查询服务 | 已实现并要求登录；初始授信及每次余额变更都留有流水 |
 | 通知、标记已读 | 通知中心、应用级未读数；`GET /notifications`、`POST /notifications/{notificationId}/read` | `NotificationController`、`NotificationService` | 已实现本人通知分页、未读筛选、类型筛选和标记已读；任务接单、送达、完成、评价等事件触发 `TASK` 通知 |
 | 系统通知发布 | 管理工作台“发布系统通知”弹窗；`POST /admin/notifications` | `AdminNotificationController`、`AdminNotificationService` | 已实现；仅管理员可发布，为全部已注册用户各写入一条 `SYSTEM` 通知，与任务通知在通知中心区分展示 |
-| 取消申请与应答 | `POST /tasks/{taskId}/cancellation-requests`、`POST /cancellation-requests/{requestId}/response` | `CancellationController` + 真实会话、任务、账务适配器 | 已实现并通过数据库集成测试；业务操作共用事务 |
+| 取消申请与应答 | `POST /tasks/{taskId}/cancellation-requests`、`POST /cancellation-requests/{requestId}/response` | `CancellationController` + 真实会话、任务、账务适配器 | 已实现并通过数据库集成测试；业务操作共用事务。应答与裁决须显式提交责任方，有责方记录 -5 信用分事件 |
 | 取消申请管理 | `GET /admin/cancellation-requests`、`POST /admin/cancellation-requests/{requestId}/arbitration` | `AdminCancellationController` + 真实适配器 | 已实现；需登录闭环提供管理员会话 |
 | 完成任务申诉与管理 | `POST /tasks/{taskId}/appeals`、`GET /admin/appeals`、`POST /admin/appeals/{appealId}/decision` | `AppealController`、`AdminAppealController` + 真实适配器 | 已实现并通过数据库集成测试；账务流水 ID 写入申诉记录 |
-| 投诉提交与处理 | `POST /complaints`、`GET /admin/complaints`、`POST /admin/complaints/{complaintId}/actions` | `ComplaintController`、`AdminComplaintController` | 已实现提交、状态筛选、数据库分页及处理留痕；管理员双重鉴权与加锁防重复处理，处罚暂未开放 |
+| 投诉提交与处理 | `POST /complaints`、`GET /admin/complaints`、`POST /admin/complaints/{complaintId}/actions` | `ComplaintController`、`AdminComplaintController` | 已实现提交、状态筛选、数据库分页、处理留痕及按情节扣信用分；管理员双重鉴权与加锁防重复处理。账务调整、功能限制和冻结仍未开放 |
 | 管理员交易流水 | `GET /admin/transactions` | `AdminTransactionController` | 已实现全量查询、用户/任务精确筛选、数据库分页及稳定排序；仅管理员可访问 |
-| 管理员用户 | 管理工作台“用户查询”；`GET /admin/users` | `AdminUserController`、`AdminUserQueryService` | 已实现关键字模糊查询与数据库分页；仅管理员可访问，不返回密码哈希 |
+| 管理员用户 | 管理工作台“用户查询”；`GET /admin/users` | `AdminUserController`、`AdminUserQueryService` | 已实现关键字模糊查询与数据库分页；仅管理员可访问，不返回密码哈希。结果额外包含 `creditScore`、`creditTier`、`creditRestricted` |
 | 管理操作日志 | 目标接口 `GET /admin/operation-logs` | 无对应 Controller | **未实现**；管理工作台对应标签禁用并标注暂未开放 |
 | 管理员任务查询 | 管理员工作台复用 `GET /tasks` 并提交关键字等查询参数 | `TaskController` 普通任务列表路由 | 已有基本查询入口；尚无专用管理员筛选接口，发布时间区间、发布者筛选及状态变更记录等需求未覆盖 |
 | 用户资料与账号安全扩展 | 需求中的资料维护、密码修改/找回、连续登录失败锁定 | `GET /users/me/profile`、`PATCH /users/me`、`POST /users/me/password` | 资料查看/编辑与登录密码修改已实现；密码找回、连续失败锁定及 7 天登录态要求仍未实现或未验证 |
-| 信用分管理 | 信用分变更、查询展示、低信用分限制 | 目标规则见 `API约定.md` §4.4；尚无信用分服务、控制器及数据模型 | **尚未实现**；信用分与钱包虚拟币/流水分离，规则已细化但无可用接口 |
+| 信用分管理 | 信用分变更、查询展示、低信用分限制 | `CreditScoreService`、`CreditController`、`AdminCreditController`、`credit_event`/`credit_record` | **已实现**：初始 80 分、评价/完成/有责取消/投诉事件、连续履约恢复、管理员复核调整、本人与管理员查询；低分限制与发布复核已接入任务流程。公开主页只展示档位/完成单的接口仍未提供 |
+| 发布复核 | 低分用户发布任务进入管理员复核 | `TaskPublicationReviewService`、`AdminTaskPublicationReviewController`、`task.publication_review_status` | **已实现**：批准后公开，驳回后取消并全额解冻；前端管理台入口仍待补 |
 | 操作日志 | 任务模块内部操作记录 | `TaskOperationLog` 及任务服务写入逻辑 | 仅覆盖部分任务操作；尚无覆盖全系统关键操作的统一日志查询接口 |
 
 ## 对齐结论与优先级
@@ -40,7 +41,7 @@
 1. **已完成：核心任务和争议账务。** 任务发布、编辑、撤回、接单、送达、验收、结算、评价、取消与申诉裁决接口已实现；余额变更通过账务服务和流水记录处理。
 2. **已完成：通知与本阶段管理功能。** 通知列表/已读、系统通知发布、投诉提交及处理留痕、管理员交易流水查询、管理员用户查询已实现；管理端由服务端鉴权，未实现的操作日志入口保持禁用。
 3. **P1：合并后环境验收。** 自动化测试使用 H2；仍需在干净 PostgreSQL 数据库验证 Flyway 迁移，并对关键页面和接口做联调验收。
-4. **后续需求缺口：信用分与账号安全。** 信用分变更、查询与低分限制尚未实现；资料查看/编辑和密码修改已完成，密码找回与连续登录失败锁定仍未覆盖，7 天登录态要求需核实。
-5. **后续管理端缺口。** 异常订单处理、完整任务筛选、统一操作日志查询，以及投诉处罚（扣信用分、调账、功能限制、冻结等）尚未完整实现。投诉处理目前仅保存有限处理留痕，不会自动处罚或通知。
+4. **已完成：信用分核心流程。** 信用分初始化、评价/完成/有责取消/投诉事件、连续履约恢复、管理员复核调整、低分限制、发布复核与查询接口已实现；公开个人主页的档位/完成单展示仍未提供。资料查看/编辑和密码修改已完成，密码找回与连续登录失败锁定仍未覆盖。
+5. **后续管理端缺口。** 异常订单处理、完整任务筛选、统一操作日志查询，以及投诉的账务调整、功能限制和冻结仍缺失。投诉目前可留痕并按情节扣信用分，但不会自动执行其他处罚或通知。管理台前端尚未接入信用分与发布复核入口。
 
 所有已实现接口应继续遵守 `{code, message, data}` 响应封装及分页 `{items, page, size, total}`；尚未实现接口应以需求文档和 OpenAPI 为后续契约，不应被视为已经联通。

@@ -10,14 +10,25 @@ const settle = async () => {
   await nextTick()
 }
 
-test('投诉处理只接受已开放的留痕方式，并校验说明', () => {
+test('投诉处理只接受已开放的留痕与信用扣分方式，并校验说明', () => {
   assert.equal(validateComplaintDecision({ actions: ['LOG_ONLY', 'WARNING'], decisionNote: '处理依据' }), '')
+  assert.equal(
+    validateComplaintDecision({
+      actions: ['LOG_ONLY', 'CREDIT_ADJUSTMENT'],
+      creditAdjustment: -5,
+      decisionNote: '一般违约',
+    }),
+    '',
+  )
   for (const body of [
     { actions: [], decisionNote: '说明' },
     { actions: ['LOG_ONLY'], decisionNote: '   ' },
     { actions: ['LOG_ONLY'], decisionNote: '字'.repeat(1001) },
     { actions: ['LOG_ONLY', 'LOG_ONLY'], decisionNote: '说明' },
-    ...['CREDIT_ADJUSTMENT', 'FINANCIAL_ADJUSTMENT', 'FUNCTION_RESTRICTION', 'ACCOUNT_FREEZE'].map(
+    { actions: ['CREDIT_ADJUSTMENT'], decisionNote: '说明' },
+    { actions: ['CREDIT_ADJUSTMENT'], creditAdjustment: -4, decisionNote: '说明' },
+    { actions: ['LOG_ONLY'], creditAdjustment: -2, decisionNote: '说明' },
+    ...['FINANCIAL_ADJUSTMENT', 'FUNCTION_RESTRICTION', 'ACCOUNT_FREEZE'].map(
       (action) => ({ actions: [action], decisionNote: '说明' }),
     ),
   ]) assert.ok(validateComplaintDecision(body))

@@ -1,6 +1,9 @@
 package edu.campus.taskplatform.complaint;
 
-/** 保留公共契约枚举；当前仅开放处理留痕，不执行处罚或通知。 */
+/**
+ * 投诉处理动作。当前开放警告/留痕/线下移交与信用扣分；
+ * 账务调整、功能限制和冻结账号仍未开放。
+ */
 public enum ComplaintAction {
 	WARNING,
 	CREDIT_ADJUSTMENT,
@@ -12,5 +15,13 @@ public enum ComplaintAction {
 
 	public boolean supportsRecordOnly() {
 		return this == WARNING || this == LOG_ONLY || this == OFFLINE_REFERRAL;
+	}
+
+	public boolean supportsCreditAdjustment() {
+		return this == CREDIT_ADJUSTMENT;
+	}
+
+	public boolean isSupported() {
+		return supportsRecordOnly() || supportsCreditAdjustment();
 	}
 }

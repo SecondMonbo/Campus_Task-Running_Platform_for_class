@@ -229,7 +229,7 @@ class AdminEndpointsIntegrationTest {
 			"{\"actions\":[\"UNKNOWN\"],\"decisionNote\":\"说明\"}",
 			"{\"actions\":[\"LOG_ONLY\"],\"decisionNote\":\"   \"}",
 			"{\"actions\":[\"LOG_ONLY\",\"LOG_ONLY\"],\"decisionNote\":\"说明\"}",
-			"{\"actions\":[\"CREDIT_ADJUSTMENT\"],\"creditAdjustment\":-2,\"decisionNote\":\"说明\"}",
+			"{\"actions\":[\"CREDIT_ADJUSTMENT\"],\"creditAdjustment\":-4,\"decisionNote\":\"说明\"}",
 			"{\"actions\":[\"FINANCIAL_ADJUSTMENT\"],\"financialAdjustment\":10,\"decisionNote\":\"说明\"}",
 			"{\"actions\":[\"ACCOUNT_FREEZE\"],\"decisionNote\":\"说明\"}",
 			"{\"actions\":[\"FUNCTION_RESTRICTION\"],\"decisionNote\":\"说明\"}",

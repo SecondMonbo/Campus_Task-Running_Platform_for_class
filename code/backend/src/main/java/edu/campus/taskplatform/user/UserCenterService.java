@@ -68,9 +68,7 @@ public class UserCenterService {
 				user.getPhone(), user.getRole().name(), user.getCreatedAt(),
 				average == null ? null : Math.round(average * 10.0) / 10.0,
 				reviewRepository.countByRevieweeId(user.getUserId()),
-				// 信誉分展示接口预留：契约中的 creditScore（0-100）待信誉分机制上线后计算，
-				// 当前返回 null，前端已按占位方式渲染。
-				null);
+				user.getCreditScore());
 	}
 
 	private static String trimToNull(String value) {

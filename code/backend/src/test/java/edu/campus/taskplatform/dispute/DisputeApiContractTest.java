@@ -164,7 +164,7 @@ class DisputeApiContractTest {
 		currentUser.signInAsUser(runner);
 		mockMvc.perform(post("/api/v1/cancellation-requests/{requestId}/response", requestId)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(json("{\"decision\":\"APPROVE\",\"note\":\"同意\"}")))
+						.content(json("{\"decision\":\"APPROVE\",\"responsibleParty\":\"NONE\",\"note\":\"同意\"}")))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.status").value("APPROVED"))
 				.andExpect(jsonPath("$.data.refundAmount").value(30))

@@ -15,6 +15,7 @@ public record CancellationRequestDto(
 		String ruling,
 		int refundAmount,
 		int runnerAmount,
+		ResponsibleParty responsibleParty,
 		Instant createdAt) {
 
 	public static CancellationRequestDto from(CancellationRequestEntity entity) {
@@ -28,6 +29,7 @@ public record CancellationRequestDto(
 				entity.getRuling() == null ? null : entity.getRuling().name(),
 				entity.getRefundAmount(),
 				entity.getRunnerAmount(),
+				entity.getResponsibleParty(),
 				entity.getCreatedAt());
 	}
 }

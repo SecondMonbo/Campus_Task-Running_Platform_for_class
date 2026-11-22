@@ -1,5 +1,6 @@
 package edu.campus.taskplatform.task.dto;
 
+import edu.campus.taskplatform.task.PublicationReviewStatus;
 import edu.campus.taskplatform.task.Task;
 import edu.campus.taskplatform.task.TaskStatus;
 
@@ -19,6 +20,7 @@ public class TaskView {
     private String pickupLocation;
     private String deliveryLocation;
     private TaskStatus status;
+    private PublicationReviewStatus publicationReviewStatus;
     private String publisherId;
     private String runnerId;
     private Instant createdAt;
@@ -33,6 +35,7 @@ public class TaskView {
         v.pickupLocation = task.getPickupLocation();
         v.deliveryLocation = task.getDeliveryLocation();
         v.status = task.getStatus();
+        v.publicationReviewStatus = task.getPublicationReviewStatus();
         v.publisherId = String.valueOf(task.getPublisherId());
         v.runnerId = task.getRunnerId() == null ? null : String.valueOf(task.getRunnerId());
         v.createdAt = task.getPublishedAt();
@@ -69,6 +72,10 @@ public class TaskView {
 
     public TaskStatus getStatus() {
         return status;
+    }
+
+    public PublicationReviewStatus getPublicationReviewStatus() {
+        return publicationReviewStatus;
     }
 
     public String getPublisherId() {

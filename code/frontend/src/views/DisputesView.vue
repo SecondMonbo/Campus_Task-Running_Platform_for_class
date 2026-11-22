@@ -8,6 +8,7 @@ import AppModal from '../components/AppModal.vue'
 const route = useRoute()
 const requestId = ref(String(route.query.requestId ?? ''))
 const decision = ref('')
+const responsibleParty = ref('NONE')
 const note = ref('')
 const confirm = ref(false)
 const busy = ref(false)
@@ -28,6 +29,7 @@ async function respond() {
   try {
     receipt.value = await api.respondCancellation(requestId.value.trim(), {
       decision: decision.value,
+      responsibleParty: decision.value === 'REJECT' ? 'NONE' : responsibleParty.value,
       note: note.value.trim(),
     })
     confirm.value = false
@@ -73,6 +75,25 @@ async function respond() {
               <option value="APPROVE">同意取消</option>
               <option value="REJECT">拒绝取消，交由管理员裁决</option>
             </select>
+          </label>
+          <label class="field">
+            责任方
+            <select
+              v-model="responsibleParty"
+              :disabled="decision === 'REJECT'"
+              required
+            >
+              <option value="NONE">双方无责</option>
+              <option value="REQUESTER">申请方有责</option>
+              <option value="RESPONDER">被申请方（本人）有责</option>
+            </select>
+            <span class="muted">
+              {{
+                decision === 'REJECT'
+                  ? '拒绝取消时责任方必须为双方无责，后续由管理员裁决。'
+                  : '同意取消时请如实确认责任方；有责一方将扣 5 信用分。'
+              }}
+            </span>
           </label>
           <label class="field">
             应答说明

@@ -28,4 +28,10 @@ public interface TaskRepository extends JpaRepository<Task, String>, JpaSpecific
     Page<Task> findByRunnerId(Long runnerId, Pageable pageable);
 
     Page<Task> findByRunnerIdAndStatus(Long runnerId, TaskStatus status, Pageable pageable);
+
+    Page<Task> findByPublicationReviewStatus(PublicationReviewStatus publicationReviewStatus,
+                                              Pageable pageable);
+
+    Page<Task> findByPublicationReviewStatusAndStatus(PublicationReviewStatus publicationReviewStatus,
+                                                       TaskStatus status, Pageable pageable);
 }

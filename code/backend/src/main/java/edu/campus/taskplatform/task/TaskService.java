@@ -2,8 +2,12 @@ package edu.campus.taskplatform.task;
 
 import edu.campus.taskplatform.accounting.AccountingService;
 import edu.campus.taskplatform.accounting.InsufficientBalanceException;
+import edu.campus.taskplatform.auth.AppUser;
 import edu.campus.taskplatform.auth.CurrentUser;
 import edu.campus.taskplatform.common.ErrorCode;
+import edu.campus.taskplatform.credit.CreditEventPublisher;
+import edu.campus.taskplatform.credit.CreditEventType;
+import edu.campus.taskplatform.credit.CreditScoreService;
 import edu.campus.taskplatform.notification.NotificationService;
 import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
@@ -12,6 +16,9 @@ import edu.campus.taskplatform.task.dto.TaskCreateRequest;
 import edu.campus.taskplatform.task.dto.TaskUpdateRequest;
 import edu.campus.taskplatform.task.dto.TaskView;
 import edu.campus.taskplatform.task.dto.WithdrawalRequest;
+import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +31,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,17 +60,23 @@ public class TaskService {
     private final TaskReviewRepository reviewRepository;
     private final AccountingService accounting;
     private final NotificationService notificationService;
+    private final CreditScoreService creditScoreService;
+    private final CreditEventPublisher creditEvents;
 
     public TaskService(TaskRepository taskRepository,
                        TaskOperationLogRepository operationLogRepository,
                        TaskReviewRepository reviewRepository,
                        AccountingService accounting,
-                       NotificationService notificationService) {
+                       NotificationService notificationService,
+                       CreditScoreService creditScoreService,
+                       CreditEventPublisher creditEvents) {
         this.taskRepository = taskRepository;
         this.operationLogRepository = operationLogRepository;
         this.reviewRepository = reviewRepository;
         this.accounting = accounting;
         this.notificationService = notificationService;
+        this.creditScoreService = creditScoreService;
+        this.creditEvents = creditEvents;
     }
 
     // ---------------------------------------------------------------
@@ -82,8 +96,14 @@ public class TaskService {
         Task task = new Task(taskId, publisher.userId(), req.getTitle(), req.getDescription(),
                 req.getReward(), req.getDeadline(), req.getPickupLocation(),
                 req.getDeliveryLocation(), now);
+        boolean restricted = creditScoreService.isRestricted(publisher.userId());
+        task.setPublicationReviewStatus(restricted
+                ? PublicationReviewStatus.PENDING_REVIEW
+                : PublicationReviewStatus.NOT_REQUIRED);
         taskRepository.save(task);
-        writeLog(taskId, publisher.userId(), "PUBLISH", "发布任务，报酬=" + req.getReward() + " 已冻结");
+        writeLog(taskId, publisher.userId(), "PUBLISH", restricted
+                ? "发布任务，报酬=" + req.getReward() + " 已冻结，等待管理员发布复核"
+                : "发布任务，报酬=" + req.getReward() + " 已冻结");
         return TaskView.from(task);
     }
 
@@ -95,14 +115,25 @@ public class TaskService {
      * 浏览任务：可选按状态、标题/地点关键字筛选，分页；空列表返回空 items。
      */
     public PageResult<TaskView> listTasks(TaskStatus status, String keyword, int page, int size) {
-        Pageable pageable = pageRequest(page, size);
+        // 排序在 Specification 中完成：预警档发布者的任务排在非预警档之后。
+        Pageable pageable = PageRequest.of(page, size);
         Page<Task> result = taskRepository.findAll(browseSpec(status, keyword), pageable);
         return PageResult.of(toViews(result.getContent()), page, size, result.getTotalElements());
     }
 
     /**
-     * 任务详情。
+     * 任务详情。待发布复核的任务仅发布者与管理员可见。
      */
+    public TaskView getTask(CurrentUser viewer, String taskId) {
+        Task task = requireTask(taskId);
+        if (!task.getPublicationReviewStatus().isPubliclyVisible()
+                && !task.getPublisherId().equals(viewer.userId()) && !viewer.isAdmin()) {
+            throw new TaskException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在");
+        }
+        return TaskView.from(task);
+    }
+
+    /** 内部/测试使用的无可见性过滤查询。 */
     public TaskView getTask(String taskId) {
         return TaskView.from(requireTask(taskId));
     }
@@ -208,6 +239,13 @@ public class TaskService {
     public TaskView acceptTask(CurrentUser runner, String taskId) {
         Task task = taskRepository.findByIdForUpdate(taskId)
                 .orElseThrow(() -> new TaskException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在"));
+        if (creditScoreService.isRestricted(runner.userId())) {
+            throw new TaskException(ErrorCode.FORBIDDEN,
+                    "信用分处于受限状态，不能接取普通任务；恢复至 75 分后自动解除限制");
+        }
+        if (!task.getPublicationReviewStatus().isPubliclyVisible()) {
+            throw new TaskException(ErrorCode.TASK_STATE_CONFLICT, "任务尚未通过发布复核，暂不可接取");
+        }
         if (task.getPublisherId().equals(runner.userId())) {
             throw new TaskException(ErrorCode.FORBIDDEN, "发布者不能接取自己发布的任务");
         }
@@ -277,6 +315,7 @@ public class TaskService {
         doSettle(taskId, publisher.userId(), runnerId, reward);
         taskRepository.save(task);
         writeLog(taskId, publisher.userId(), "COMPLETE", "确认完成，报酬=" + reward + " 结算给跑腿员");
+        publishCompletionCreditEvent(task, runnerId);
         safeNotify(runnerId, "任务已完成",
                 "「" + task.getTitle() + "」已完成，报酬 " + reward + " 虚拟币已结算到你的钱包。", taskId);
         return TaskView.from(task);
@@ -299,10 +338,37 @@ public class TaskService {
         if (reviewRepository.existsByTaskIdAndReviewerId(taskId, publisher.userId())) {
             throw new TaskException(ErrorCode.DUPLICATE_ACTION, "该任务已被本人评价过");
         }
+        Instant now = Instant.now();
+        int score = req.getScore();
+        CreditEventType eventType;
+        int delta;
+        String reason;
+        if (score == 5) {
+            eventType = CreditEventType.REVIEW_5_STAR;
+            delta = 2;
+            reason = "收到 5 星评价";
+        }
+        else if (score >= 3) {
+            eventType = CreditEventType.REVIEW_3_4_STAR;
+            delta = 0;
+            reason = "收到 " + score + " 星评价";
+        }
+        else {
+            // 同一评价人对同一跑腿员的滚动 30 天内，仅首次低星评价扣分。
+            long recentLowStars = reviewRepository
+                    .countByReviewerIdAndRevieweeIdAndScoreLessThanEqualAndCreatedAtGreaterThanEqual(
+                            publisher.userId(), task.getRunnerId(), 2, now.minus(Duration.ofDays(30)));
+            eventType = CreditEventType.REVIEW_LOW_STAR;
+            delta = recentLowStars == 0 ? -3 : 0;
+            reason = recentLowStars == 0
+                    ? "收到 " + score + " 星评价（30 天内首次低星评价）"
+                    : "收到 " + score + " 星评价（30 天内已扣过低星评价分）";
+        }
         TaskReview review = new TaskReview(UUID.randomUUID().toString(), taskId,
-                publisher.userId(), task.getRunnerId(), req.getScore(), req.getContent(), Instant.now());
+                publisher.userId(), task.getRunnerId(), score, req.getContent(), now);
         reviewRepository.save(review);
         writeLog(taskId, publisher.userId(), "REVIEW", "提交评价");
+        creditEvents.publish(task.getRunnerId(), eventType, review.getReviewId(), delta, reason);
         safeNotify(task.getRunnerId(), "收到新的评价",
                 "你的任务「" + task.getTitle() + "」收到发布者评价，评分 " + req.getScore() + " 星。", taskId);
         return review;
@@ -326,6 +392,38 @@ public class TaskService {
         if (!task.getPublisherId().equals(actor.userId())) {
             throw new TaskException(ErrorCode.FORBIDDEN, "无权操作该任务");
         }
+    }
+
+    /**
+     * 任务完成时记录信用分事件：按时 +1；超过截止 24 小时 -5；中间窗口只累计连续履约。
+     * 每任务最多一条完成事件，事件按任务 ID 幂等。
+     */
+    private void publishCompletionCreditEvent(Task task, Long runnerId) {
+        Instant deliveredAt = task.getDeliveredAt();
+        CreditEventType eventType;
+        int delta;
+        String reason;
+        if (deliveredAt == null) {
+            eventType = CreditEventType.TASK_COMPLETED_IN_WINDOW;
+            delta = 0;
+            reason = "任务完成（缺少送达时间，不计按时或超时）";
+        }
+        else if (!deliveredAt.isAfter(task.getDeadline())) {
+            eventType = CreditEventType.TASK_COMPLETED_ON_TIME;
+            delta = 1;
+            reason = "按时完成任务";
+        }
+        else if (deliveredAt.isAfter(task.getDeadline().plus(Duration.ofHours(24)))) {
+            eventType = CreditEventType.TASK_COMPLETED_LATE;
+            delta = -5;
+            reason = "超过截止时间 24 小时送达";
+        }
+        else {
+            eventType = CreditEventType.TASK_COMPLETED_IN_WINDOW;
+            delta = 0;
+            reason = "任务完成（截止后 24 小时内送达）";
+        }
+        creditEvents.publish(runnerId, eventType, task.getTaskId(), delta, reason);
     }
 
     private void writeLog(String taskId, Long actorId, String action, String detail) {
@@ -390,6 +488,9 @@ public class TaskService {
     private Specification<Task> browseSpec(TaskStatus status, String keyword) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            // 待复核/已驳回的任务不进入公开待接单列表。
+            predicates.add(root.get("publicationReviewStatus")
+                    .in(PublicationReviewStatus.NOT_REQUIRED, PublicationReviewStatus.APPROVED));
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
@@ -399,6 +500,16 @@ public class TaskService {
                         cb.like(cb.lower(root.get("title")), like),
                         cb.like(cb.lower(root.get("pickupLocation")), like),
                         cb.like(cb.lower(root.get("deliveryLocation")), like)));
+            }
+            if (query != null) {
+                Join<Task, AppUser> publisher = root.join("publisher", JoinType.LEFT);
+                Expression<Integer> warningTier = cb.<Integer>selectCase()
+                        .when(cb.between(publisher.get("creditScore"), 60, 74), 1)
+                        .otherwise(0);
+                query.orderBy(
+                        cb.asc(warningTier),
+                        cb.desc(root.get("publishedAt")),
+                        cb.desc(root.get("taskId")));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
