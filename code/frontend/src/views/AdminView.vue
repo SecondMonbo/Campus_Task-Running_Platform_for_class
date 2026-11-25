@@ -9,6 +9,8 @@ import SystemNoticeModal from '../components/SystemNoticeModal.vue'
 import AppIcon from '../components/AppIcon.vue'
 import AsyncPanel from '../components/AsyncPanel.vue'
 import PageControls from '../components/PageControls.vue'
+import CreditReviewModal from '../components/CreditReviewModal.vue'
+import { canReviewComplaint, creditStatuses, signedCredit } from '../domain/credit.js'
 const section = ref('cancellation-requests')
 const status = ref('PENDING_ADMIN')
 const keyword = ref('')
@@ -19,6 +21,7 @@ const actorId = ref('')
 const logAction = ref('')
 const filters = ref({})
 const selected = ref(null)
+const creditReview = ref(null)
 const noticeOpen = ref(false)
 const tabs = {
   'cancellation-requests': '取消裁决',
@@ -61,6 +64,7 @@ const { items, total, page, size, loading, error, reload } = usePaged(
 function switchSection(value) {
   if (pendingSections.includes(value)) return
   selected.value = null
+  creditReview.value = null
   status.value =
     { 'cancellation-requests': 'PENDING_ADMIN', appeals: 'PENDING', complaints: 'PENDING' }[
       value
@@ -101,6 +105,7 @@ const labelForStatus = (value) => statuses.value[value] ?? value
         <p class="page-subtitle">处理争议，查询记录，维护任务秩序。</p>
       </div>
       <div class="heading-actions">
+        <RouterLink to="/admin/credit" class="button secondary">信用分查询</RouterLink>
         <button class="button primary" @click="noticeOpen = true">
           <AppIcon name="megaphone" :size="16" />
           发布系统通知
@@ -261,8 +266,16 @@ const labelForStatus = (value) => statuses.value[value] ?? value
                     </small>
                     <small v-if="item.decisionNote">处理说明：{{ item.decisionNote }}</small>
                     <small v-if="item.handledBy">处理管理员 #{{ item.handledBy }}</small>
+                    <template v-if="item.actions?.includes('CREDIT_ADJUSTMENT')">
+                      <small>请求扣分 {{ signedCredit(item.creditAdjustment) }} · 实际变动 {{ signedCredit(item.creditActualAdjustment) }}</small>
+                      <small>{{ creditStatuses[item.creditStatus] || '信用处理状态待核对' }}</small>
+                      <small v-if="item.creditRecordId">信用记录 #{{ item.creditRecordId }}</small>
+                    </template>
                   </td>
-                  <td>{{ item.reporterId }} / {{ item.targetUserId || '—' }}</td>
+                  <td>
+                    {{ item.reporterId }} / {{ item.targetUserId || '—' }}
+                    <RouterLink v-if="item.targetUserId" class="text-link small" :to="{ name: 'admin-credit', query: { userId: item.targetUserId } }">查询被投诉人信用</RouterLink>
+                  </td>
                   <td>{{ labelForStatus(item.status) }}</td>
                   <td>
                     {{ formatDate(item.createdAt) }}
@@ -277,6 +290,8 @@ const labelForStatus = (value) => statuses.value[value] ?? value
                       处理
                     </button>
                     <span v-else class="small muted">已处理</span>
+                    <button v-if="canReviewComplaint(item)" class="button secondary small" @click="creditReview = item">复核扣分</button>
+                    <small v-else-if="item.actions?.includes('CREDIT_ADJUSTMENT')" class="muted">{{ item.creditStatus === 'PENDING' ? '记分完成后可复核' : '复核尚未开放或状态需核对' }}</small>
                   </td>
                 </tr>
               </tbody>
@@ -405,6 +420,7 @@ const labelForStatus = (value) => statuses.value[value] ?? value
       />
     </section>
     <AdminDecision v-if="selected" :kind="section" :record="selected" @close="selected = null" />
+    <CreditReviewModal v-if="creditReview" mode="complaint" :record="creditReview" @close="creditReview = null" />
     <SystemNoticeModal v-if="noticeOpen" @close="noticeOpen = false" />
   </section>
 </template>

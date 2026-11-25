@@ -12,9 +12,12 @@ import {
 } from './composables/state.js'
 import AppIcon from './components/AppIcon.vue'
 import AsyncPanel from './components/AsyncPanel.vue'
+import CreditNotice from './components/CreditNotice.vue'
+import { provideCurrentCredit } from './composables/credit.js'
 
 const route = useRoute()
 const router = useRouter()
+provideCurrentCredit()
 const mobileMenu = ref(false)
 const isDemo = import.meta.env.MODE === 'demo'
 const isMock = import.meta.env.MODE === 'apifox'
@@ -120,6 +123,10 @@ async function logout() {
             <AppIcon name="shield" :size="21" />
             <span>管理工作台</span>
           </RouterLink>
+          <RouterLink to="/admin/credit" class="nav-item" @click="mobileMenu = false">
+            <AppIcon name="user" :size="21" />
+            <span>信用分管理</span>
+          </RouterLink>
         </template>
       </nav>
       <div class="sidebar-bottom">
@@ -185,6 +192,7 @@ async function logout() {
         </div>
       </header>
       <main id="main-content" class="main-content">
+        <CreditNotice :key="session.userId" />
         <RouterView :key="session.userId" />
       </main>
       <footer class="site-footer">

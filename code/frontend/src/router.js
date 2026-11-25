@@ -37,6 +37,12 @@ export const frontendBRoutes = [
     meta: { title: '取消与申诉' },
   },
   {
+    path: '/admin/credit',
+    name: 'admin-credit',
+    component: () => import('./views/AdminCreditView.vue'),
+    meta: { title: '信用分管理', admin: true },
+  },
+  {
     path: '/admin',
     component: () => import('./views/AdminView.vue'),
     meta: { title: '管理工作台', admin: true },

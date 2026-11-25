@@ -1,4 +1,6 @@
 import { ApiError, client } from './client.js'
+import { createCreditApi } from './credit.js'
+import { isComplaintCreditReceipt } from '../domain/credit.js'
 
 const id = (value) => encodeURIComponent(String(value))
 const get = (path, query, signal) => client.request(path, { query, signal })
@@ -12,6 +14,7 @@ async function page(path, query, signal) {
 }
 
 export const api = {
+  ...createCreditApi(client),
   register: (body) => post('/auth/register', body),
   login: (body) => post('/auth/login', body),
   logout: () => post('/auth/logout'),
@@ -48,6 +51,12 @@ export const api = {
   arbitrate: (requestId, body) =>
     post(`/admin/cancellation-requests/${id(requestId)}/arbitration`, body),
   decideAppeal: (appealId, body) => post(`/admin/appeals/${id(appealId)}/decision`, body),
-  handleComplaint: (complaintId, body) =>
-    post(`/admin/complaints/${id(complaintId)}/actions`, body),
+  handleComplaint: async (complaintId, body, targetUserId) => {
+    const result = await post(`/admin/complaints/${id(complaintId)}/actions`, body)
+    if ((body.actions?.includes('CREDIT_ADJUSTMENT') &&
+      !isComplaintCreditReceipt(result, complaintId, body.creditAdjustment, targetUserId)) ||
+      (body.complaintResult && result?.complaintResult !== body.complaintResult))
+      throw new ApiError('投诉处理回执不完整，请刷新列表核对，勿重复提交处罚。', 0, 'INVALID_RESPONSE')
+    return result
+  },
 }

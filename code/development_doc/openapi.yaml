@@ -8,6 +8,7 @@ info:
     管理接口必须由后端校验 ADMIN 角色，不能仅依赖前端路由限制。
   contact:
     name: Campus Task Platform Team
+x-credit-draft: ./openapi-credit.draft.yaml
 servers:
   - url: http://localhost:8080
     description: 本机开发环境；非 localhost 部署必须使用 HTTPS
@@ -1499,6 +1500,10 @@ components:
           type: string
         status:
           $ref: '#/components/schemas/TaskStatus'
+        publicationReviewStatus:
+          type: string
+          enum: [NOT_REQUIRED, PENDING, APPROVED, REJECTED]
+          description: 待后端 B 确认实现的独立发布复核状态；PENDING 不进入公开列表，不改变任务状态枚举。
         publisherId:
           type: string
         runnerId:
@@ -1971,7 +1976,7 @@ components:
           maxLength: 2000
     ComplaintActionRequest:
       type: object
-      description: 当前仅开放处理留痕；处罚动作及调整字段返回 400，投诉保持待处理。
+      description: 当前后端仅开放处理留痕；信用扩展见 openapi-credit.draft.yaml。只有 DTO.allowedActions 明确开放时，前端才提交新增的信用扣分字段。
       additionalProperties: false
       required: [actions, decisionNote]
       properties:
@@ -1984,7 +1989,12 @@ components:
             $ref: '#/components/schemas/ComplaintAction'
         creditAdjustment:
           type: integer
-          description: 预留字段，当前不允许提交，提交返回 400。
+          enum: [-2, -5, -10]
+          description: 待后端 B 接入；只有投诉成立、被投诉人明确且选择 CREDIT_ADJUSTMENT 时携带，当前后端仍返回 400。
+        complaintResult:
+          type: string
+          enum: [SUPPORTED, REJECTED]
+          description: 待后端 B 接入的投诉结论；扣分时必须为 SUPPORTED，旧留痕请求可省略。
         financialAdjustment:
           type: integer
           description: 预留字段，当前不允许提交，提交返回 400。
@@ -2023,6 +2033,31 @@ components:
           items:
             $ref: '#/components/schemas/ComplaintAction'
           description: 已保存的处理方式；待处理时为空。
+        allowedActions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplaintAction'
+          description: 待后端 B 接入的允许处理方式，缺少此字段时仅兼容旧留痕动作，不开放信用扣分。
+        complaintResult:
+          type: [string, 'null']
+          enum: [SUPPORTED, REJECTED, null]
+        creditStatus:
+          type: [string, 'null']
+          enum: [PENDING, APPLIED, FAILED, null]
+          description: 待后端 B 接入；等待记分、已生效和记分失败必须分别展示。
+        creditAdjustment:
+          type: [integer, 'null']
+          enum: [-2, -5, -10, null]
+        creditActualAdjustment:
+          type: [integer, 'null']
+          minimum: -10
+          maximum: 0
+        creditRecordId:
+          type: [string, 'null']
+        creditReviewAllowed:
+          type: boolean
+          default: false
+          description: 待后端 B 接入；仅有原信用记录且处罚已生效时允许复核，缺省为不开放。
         decisionNote:
           type: [string, 'null']
         handledBy:

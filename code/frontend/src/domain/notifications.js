@@ -1,6 +1,7 @@
 export const notificationTypes = {
   TASK: '任务通知',
   SYSTEM: '系统通知',
+  CREDIT: '信用通知',
 }
 
 /** 校验管理员发布系统通知的表单，规则与 openapi 的 SystemNotificationRequest 一致。 */

@@ -5,8 +5,11 @@ import { api } from '../api/index.js'
 import { changed, notify } from '../composables/state.js'
 import { validateTaskDraft } from '../domain/tasks.js'
 import AppIcon from '../components/AppIcon.vue'
+import { useCurrentCredit } from '../composables/credit.js'
 
 const router = useRouter()
+const currentCredit = useCurrentCredit()
+const needsReview = computed(() => (currentCredit.data.value || currentCredit.lastKnown.value)?.requiresPublishReview === true)
 const busy = ref(false)
 const error = ref('')
 const errorCode = ref('')
@@ -47,8 +50,9 @@ async function submit() {
   try {
     const task = await api.createTask(draft)
     changed()
-    notify(`任务“${task.title}”发布成功，报酬已冻结。`)
-    await router.push('/tasks')
+    const pendingReview = task.publicationReviewStatus === 'PENDING'
+    notify(pendingReview ? `任务“${task.title}”已提交复核，通过后才会公开，报酬已冻结。` : `任务“${task.title}”发布成功，报酬已冻结。`)
+    await router.push(pendingReview ? { name: 'task-detail', params: { taskId: task.taskId } } : '/tasks')
   } catch (failure) {
     error.value = failure.message
     errorCode.value = failure.code
@@ -73,7 +77,7 @@ async function submit() {
     <div class="disputes-layout">
       <article class="panel form-panel">
         <h2>任务信息</h2>
-        <p class="muted">发布后任务会立即出现在任务大厅，等待其他同学接取。</p>
+        <p class="muted">{{ needsReview ? '新发布任务需要管理员复核，通过后才会出现在任务大厅。' : '发布后的可见范围以服务端返回的复核状态为准。' }}</p>
         <form @submit.prevent="submit">
           <label class="field">
             任务标题
@@ -172,7 +176,7 @@ async function submit() {
         <article class="panel help-card">
           <span class="stat-icon blue"><AppIcon name="tasks" :size="22" /></span>
           <h3>发布之后</h3>
-          <p>任务会出现在任务大厅，其他同学可以接取执行。</p>
+          <p>{{ needsReview ? '任务通过管理员复核后才会公开，等待期间可在我的任务中查看。' : '任务按服务端返回的复核状态公开，其他同学可以接取执行。' }}</p>
           <p>任务进度在“我的任务 → 我发布的”中查看。</p>
           <RouterLink to="/tasks" class="text-link">前往任务大厅 →</RouterLink>
         </article>

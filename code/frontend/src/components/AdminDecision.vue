@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { api } from '../api/index.js'
 import { changed, notify, useResource } from '../composables/state.js'
 import {
@@ -9,7 +9,8 @@ import {
 } from '../domain/tasks.js'
 import AppModal from './AppModal.vue'
 import AsyncPanel from './AsyncPanel.vue'
-import { complaintActions, recordOnlyActions, validateComplaintDecision } from '../domain/admin.js'
+import { allowedComplaintActions, complaintActions, validateComplaintDecision } from '../domain/admin.js'
+import { complaintPenalties, signedCredit } from '../domain/credit.js'
 const props = defineProps({ kind: String, record: Object })
 const emit = defineEmits(['close'])
 const busy = ref(false)
@@ -23,7 +24,12 @@ const form = ref({
   transferAmount: 0,
   decisionNote: '',
   actions: ['LOG_ONLY'],
+  creditAdjustment: '',
+  complaintResult: '',
 })
+const allowedActions = computed(() => allowedComplaintActions(props.record))
+const creditAvailable = computed(() => allowedActions.value.includes('CREDIT_ADJUSTMENT'))
+if (props.kind === 'complaints') form.value.actions = form.value.actions.filter((action) => allowedActions.value.includes(action))
 const {
   data: task,
   loading,
@@ -63,19 +69,30 @@ async function submit() {
     error.value = validateAppealDecision(body)
   } else {
     body = { actions: [...values.actions], decisionNote: values.decisionNote.trim() }
-    error.value = validateComplaintDecision(body)
+    if (creditAvailable.value && values.complaintResult) body.complaintResult = values.complaintResult
+    if (body.actions.includes('CREDIT_ADJUSTMENT')) body.creditAdjustment = Number(values.creditAdjustment)
+    error.value = validateComplaintDecision(body, props.record)
   }
   if (error.value) return
   busy.value = true
   try {
     if (props.kind === 'cancellation-requests') await api.arbitrate(props.record.requestId, body)
     else if (props.kind === 'appeals') await api.decideAppeal(props.record.appealId, body)
-    else await api.handleComplaint(props.record.complaintId, body)
-    notify(props.kind === 'complaints' ? '投诉处理记录已保存。' : '处理结果已提交。')
+    else {
+      const receipt = await api.handleComplaint(props.record.complaintId, body, props.record.targetUserId)
+      if (body.actions.includes('CREDIT_ADJUSTMENT')) {
+        notify(receipt.creditStatus === 'APPLIED'
+          ? `投诉处理已保存，信用分实际变动 ${signedCredit(receipt.creditActualAdjustment)}。`
+          : receipt.creditStatus === 'PENDING' ? '投诉处理已保存，信用扣分等待记分。' : '投诉处理已保存，信用记分异常，请核对记录。',
+        receipt.creditStatus === 'FAILED' ? 'error' : 'success')
+      } else notify('投诉处理记录已保存。')
+    }
+    if (props.kind !== 'complaints') notify('处理结果已提交。')
     changed()
     emit('close')
   } catch (failure) {
     error.value = failure.message
+    if (props.kind === 'complaints' && failure.code === 'INVALID_RESPONSE') changed()
     if (props.kind === 'complaints' && failure.status === 409) {
       notify(failure.message, 'error')
       changed()
@@ -189,6 +206,14 @@ async function submit() {
         </label>
       </template>
       <template v-else>
+        <label v-if="creditAvailable" class="field">
+          投诉结论
+          <select v-model="form.complaintResult" :disabled="busy" @change="form.complaintResult === 'REJECTED' && (form.actions = form.actions.filter((action) => action !== 'CREDIT_ADJUSTMENT'))">
+            <option value="">仅处理留痕</option>
+            <option value="SUPPORTED">投诉成立</option>
+            <option value="REJECTED">投诉驳回</option>
+          </select>
+        </label>
         <fieldset class="checkbox-group">
           <legend>处理方式（可多选）</legend>
           <label v-for="(label, value) in complaintActions" :key="value">
@@ -196,12 +221,20 @@ async function submit() {
               v-model="form.actions"
               type="checkbox"
               :value="value"
-              :disabled="!recordOnlyActions.includes(value)"
+              :disabled="busy || !allowedActions.includes(value) || (value === 'CREDIT_ADJUSTMENT' && form.complaintResult !== 'SUPPORTED')"
             />
             {{ label }}
-            <span v-if="!recordOnlyActions.includes(value)" class="small muted">暂未开放</span>
+            <span v-if="!allowedActions.includes(value)" class="small muted">{{ value === 'CREDIT_ADJUSTMENT' && !record.targetUserId ? '无扣分对象' : '暂未开放' }}</span>
           </label>
         </fieldset>
+        <label v-if="form.actions.includes('CREDIT_ADJUSTMENT')" class="field">
+          扣分档位
+          <select v-model.number="form.creditAdjustment" required :disabled="busy" aria-label="扣分档位">
+            <option disabled value="">请选择扣分档位</option>
+            <option v-for="(penalty, value) in complaintPenalties" :key="value" :value="Number(value)">{{ penalty.label }}</option>
+          </select>
+          <span class="field-hint">{{ complaintPenalties[form.creditAdjustment]?.basis || '档位依据事实和证据选择，不由投诉分类自动决定。' }}</span>
+        </label>
         <label class="field">
           处理说明
           <textarea
@@ -209,12 +242,14 @@ async function submit() {
             required
             maxlength="1000"
             rows="4"
+            :disabled="busy"
             placeholder="说明处理依据、涉及对象与处理结论"
           />
         </label>
       </template>
       <p v-if="kind === 'complaints'" class="notice">
-        本次仅保存处理记录。提醒与线下移交需另行完成；扣分、调账、限制功能和冻结账号暂未开放。
+        {{ creditAvailable ? '投诉成立并选择扣分后，请在处理说明中记录事实和档位依据；实际分值及记分进度以处理回执为准。' : '当前记录仅支持已开放的处理留痕；信用扣分需服务端开放后使用。' }}
+        提醒与线下移交需另行完成，账务处理、功能限制和账号冻结暂未开放。
       </p>
       <p v-else class="notice">请核对处理结论和金额后提交。</p>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>
