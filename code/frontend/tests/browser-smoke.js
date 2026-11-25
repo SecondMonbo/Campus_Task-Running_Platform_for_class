@@ -529,11 +529,11 @@ async function verifyFrontendB(page) {
       .body.actions.includes('WARNING'),
     '处理方式必须提交留痕',
   )
-  for (const tab of ['任务查询', '交易流水']) {
+  for (const tab of ['用户查询', '任务查询', '交易流水']) {
     await page.getByRole('button', { name: tab, exact: true }).click()
     await page.locator('tbody tr').first().waitFor()
   }
-  for (const tab of ['用户查询', '操作日志']) {
+  for (const tab of ['操作日志']) {
     check(await page.getByRole('button', { name: new RegExp(tab) }).isDisabled(), '未实现查询保持禁用')
   }
   record('申诉裁决保留原任务和流水、投诉处理与管理查询')

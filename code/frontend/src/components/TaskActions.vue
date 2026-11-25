@@ -4,10 +4,14 @@ import { api } from '../api/index.js'
 import { changed, notify, session } from '../composables/state.js'
 import { taskPermissions, validateTaskDraft } from '../domain/tasks.js'
 import AppModal from './AppModal.vue'
+import { useCurrentCredit } from '../composables/credit.js'
 
 const props = defineProps({ task: { type: Object, required: true }, compact: Boolean })
 const emit = defineEmits(['refresh'])
 const permissions = computed(() => taskPermissions(props.task, session.value))
+const currentCredit = useCurrentCredit()
+const acceptBlocked = computed(() => currentCredit.loading.value ||
+  (currentCredit.data.value || currentCredit.lastKnown.value)?.canAcceptNormalTasks === false)
 const action = ref('')
 const busy = ref(false)
 const error = ref('')
@@ -46,6 +50,7 @@ function toLocalInput(iso) {
   )}:${pad(date.getMinutes())}`
 }
 function open(kind) {
+  if (kind === 'accept' && acceptBlocked.value) return
   action.value = kind
   error.value = ''
   if (kind === 'edit') {
@@ -68,6 +73,10 @@ function open(kind) {
 async function submit() {
   if (busy.value) return
   error.value = ''
+  if (action.value === 'accept' && acceptBlocked.value) {
+    error.value = '当前信用状态不允许接取普通任务，请刷新信用状态后核对。'
+    return
+  }
   if (action.value === 'edit') {
     const draft = {
       title: form.value.title,
@@ -178,6 +187,7 @@ async function submit() {
     emit('refresh')
   } catch (failure) {
     error.value = failure.message
+    if (['CREDIT_RESTRICTED', 'CREDIT_STATE_CHANGED'].includes(failure.code)) currentCredit.reload()
     if (failure.status === 409) {
       notify(`${failure.message} 正在刷新任务信息。`, 'error')
       action.value = ''
@@ -192,8 +202,8 @@ async function submit() {
 
 <template>
   <div class="task-actions">
-    <button v-if="permissions.accept" class="button primary" @click="open('accept')">
-      接取任务
+    <button v-if="permissions.accept" class="button primary" :disabled="acceptBlocked" @click="open('accept')">
+      {{ currentCredit.loading.value ? '正在确认信用状态…' : acceptBlocked ? '信用受限，暂不可接单' : '接取任务' }}
     </button>
     <button v-if="permissions.deliver" class="button primary" @click="open('deliver')">
       确认送达

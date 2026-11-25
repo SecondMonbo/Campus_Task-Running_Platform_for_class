@@ -1,0 +1,322 @@
+openapi: 3.1.0
+info:
+  title: 信用分前端对接契约 待后端确认
+  version: 0.1.0-draft
+  description: |
+    前端 B 按 API约定.md 的信用规则实现。本文中的新增路径和字段均待后端确认与实现，
+    不表示当前后端已提供信用服务。沿用 /api/v1、Session、CSRF、字符串 ID 与 0 起始分页。
+    管理操作必须在服务端校验 ADMIN。信用记分与余额、交易流水相互独立。
+x-implementation-status: frontend-only
+security:
+  - sessionCookie: []
+paths:
+  /api/v1/users/me/credit:
+    get:
+      summary: 查询本人信用状态
+      description: 身份来自会话；权限标志由后端 B 合成，不由客户端只按分数推断。
+      responses:
+        '200':
+          description: data 为 CreditSummary；不返回其他用户的精确分数。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditSummaryResponse'
+  /api/v1/admin/credits:
+    get:
+      summary: 管理员分页查询信用分
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: userId
+          in: query
+          schema: {type: string, pattern: '^[1-9][0-9]{0,18}$'}
+        - name: creditLevel
+          in: query
+          schema: {$ref: '#/components/schemas/CreditLevel'}
+        - name: reviewPending
+          in: query
+          schema: {type: boolean}
+      responses:
+        '200':
+          description: 在数据库筛选与分页；按 updatedAt、userId 倒序，超页返回空 items。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditSummaryPageResponse'
+  /api/v1/admin/credits/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      summary: 管理员查询指定用户信用状态和复核权限
+      responses:
+        '200':
+          description: 精确分数、受限状态、允许的管理动作和待处理复核申请。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditSummaryResponse'
+  /api/v1/admin/credits/{userId}/records:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      summary: 管理员分页查询信用变更记录
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: eventType
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: 按 createdAt、recordId 倒序；保留初始化、零分变更和原始处罚记录。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditRecordPageResponse'
+  /api/v1/admin/credits/{userId}/adjustments:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      summary: 管理员追加信用调整
+      description: 仅 adjustmentAllowed 为 true 时展示可提交入口；必须追加记录，不覆盖原历史。
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [adjustment, reason]
+              properties:
+                adjustment: {$ref: '#/components/schemas/Adjustment'}
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '200':
+          $ref: '#/components/responses/CreditOperation'
+  /api/v1/admin/complaints/{complaintId}/credit-reviews:
+    parameters:
+      - name: complaintId
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      summary: 复核已生效的投诉扣分
+      description: |
+        仅 creditReviewAllowed 为 true、creditStatus 为 APPLIED 且有原信用记录时开放。
+        UPHELD 维持原处理；REVOKED 由服务端按原记录实际扣分反向纠正，不能按请求扣分补回；
+        ADJUSTED 使用明确的整数增减值。保留原投诉和原信用记录，追加复核与调整记录。
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewDecision'
+      responses:
+        '200':
+          $ref: '#/components/responses/CreditOperation'
+  /api/v1/users/me/credit-reviews:
+    post:
+      summary: 本人申请信用处分复核
+      description: 仅 reviewRequestAllowed 为 true 时可提交，已有待处理申请不得重复创建。
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '201':
+          description: data 为新建的 CreditReviewRequest，status 必须为 PENDING。
+  /api/v1/admin/credit-reviews/{reviewId}/decision:
+    parameters:
+      - name: reviewId
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      summary: 管理员处理信用复核申请
+      description: reviewDecisionAllowed 为 true 时可处理；支持 UPHELD 或 ADJUSTED，重复裁决返回 409。
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewDecision'
+      responses:
+        '200':
+          $ref: '#/components/responses/CreditOperation'
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: JSESSIONID}
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[1-9][0-9]{0,18}$'}
+    Page:
+      name: page
+      in: query
+      schema: {type: integer, minimum: 0, default: 0}
+    Size:
+      name: size
+      in: query
+      schema: {type: integer, enum: [10, 20, 50], default: 10}
+    Csrf:
+      name: X-XSRF-TOKEN
+      in: header
+      required: true
+      schema: {type: string}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, format: uuid}
+      description: 同一次提交在超时后重试使用同一键；更换目标或内容须换键，服务端按操作者和键去重。
+  responses:
+    CreditOperation:
+      description: |
+        data 为 CreditOperationReceipt。只有 APPLIED 才表示信用变更已生效；
+        PENDING 表示已排队，FAILED 表示待核对或重试，不得包装成已扣分成功。
+        同一幂等键的相同请求返回原回执，不重复加减分；不同内容使用同一键返回 409。
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code, message, data]
+            properties:
+              code: {const: OK}
+              message: {type: string}
+              data: {$ref: '#/components/schemas/CreditOperationReceipt'}
+  schemas:
+    CreditLevel:
+      type: string
+      enum: [EXCELLENT, GOOD, WARNING, RESTRICTED]
+      description: 90–100 优秀，75–89 良好，60–74 预警，0–59 受限；档位不替代权限状态。
+    CreditSummary:
+      type: object
+      required: [userId, creditScore, creditLevel, restrictionActive, canAcceptNormalTasks, requiresPublishReview, consecutiveCompletedCount, updatedAt]
+      properties:
+        userId: {type: string}
+        displayName: {type: string}
+        creditScore: {type: integer, minimum: 0, maximum: 100}
+        creditLevel: {$ref: '#/components/schemas/CreditLevel'}
+        restrictionActive:
+          type: boolean
+          description: 服务端低分限制状态；历史受限账号恢复到 60–74 时，不由客户端自行解禁。
+        canAcceptNormalTasks: {type: boolean}
+        requiresPublishReview: {type: boolean}
+        consecutiveCompletedCount: {type: integer, minimum: 0, maximum: 10}
+        adjustmentAllowed: {type: boolean, default: false}
+        reviewRequestAllowed: {type: boolean, default: false}
+        reviewDecisionAllowed: {type: boolean, default: false}
+        pendingReview:
+          oneOf:
+            - {$ref: '#/components/schemas/CreditReviewRequest'}
+            - {type: 'null'}
+        updatedAt: {type: string, format: date-time}
+    CreditReviewRequest:
+      type: object
+      required: [reviewId, userId, status, reason, createdAt]
+      properties:
+        reviewId: {type: string}
+        userId: {type: string}
+        status: {type: string, enum: [PENDING, DECIDED]}
+        reason: {type: string}
+        createdAt: {type: string, format: date-time}
+    CreditRecord:
+      type: object
+      required: [recordId, userId, eventType, eventId, reason, requestedAdjustment, actualAdjustment, scoreBefore, scoreAfter, createdAt]
+      properties:
+        recordId: {type: string}
+        userId: {type: string}
+        eventType: {type: string}
+        eventId: {type: string}
+        reason: {type: string}
+        requestedAdjustment: {type: integer}
+        actualAdjustment: {type: integer}
+        scoreBefore: {type: [integer, 'null'], minimum: 0, maximum: 100}
+        scoreAfter: {type: integer, minimum: 0, maximum: 100}
+        administratorId: {type: [string, 'null']}
+        createdAt: {type: string, format: date-time}
+    Adjustment:
+      type: integer
+      minimum: -2147483648
+      maximum: 2147483647
+      not: {const: 0}
+      description: 明确的增减值，服务端将分数截断在 0–100，实际变动另行返回。
+    ReviewDecision:
+      type: object
+      additionalProperties: false
+      required: [result, decisionNote]
+      properties:
+        result: {type: string, enum: [UPHELD, REVOKED, ADJUSTED]}
+        adjustment: {$ref: '#/components/schemas/Adjustment'}
+        decisionNote: {type: string, minLength: 1, maxLength: 1000}
+      description: 仅 ADJUSTED 携带 adjustment；REVOKED 仅用于投诉复核，纠正原记录的实际扣分。
+    CreditOperationReceipt:
+      type: object
+      required: [eventId, userId, status, requestedAdjustment, actualAdjustment, scoreBefore, scoreAfter]
+      properties:
+        eventId: {type: string}
+        userId: {type: string}
+        status: {type: string, enum: [PENDING, APPLIED, FAILED]}
+        creditRecordId: {type: [string, 'null']}
+        complaintId: {type: string}
+        reviewId: {type: string}
+        requestedAdjustment: {type: integer}
+        actualAdjustment: {type: [integer, 'null']}
+        scoreBefore: {type: [integer, 'null'], minimum: 0, maximum: 100}
+        scoreAfter: {type: [integer, 'null'], minimum: 0, maximum: 100}
+      description: APPLIED 时信用记录编号和分数必须有效，且实际变动等于前后差；其余状态允许分数字段为 null。
+    CreditSummaryResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {const: OK}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/CreditSummary'}
+    CreditSummaryPageResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {const: OK}
+        message: {type: string}
+        data:
+          type: object
+          required: [items, page, size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/CreditSummary'}}
+            page: {type: integer, minimum: 0}
+            size: {type: integer, enum: [10, 20, 50]}
+            total: {type: integer, minimum: 0}
+    CreditRecordPageResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {const: OK}
+        message: {type: string}
+        data:
+          type: object
+          required: [items, page, size, total]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/CreditRecord'}}
+            page: {type: integer, minimum: 0}
+            size: {type: integer, enum: [10, 20, 50]}
+            total: {type: integer, minimum: 0}

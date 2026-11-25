@@ -35,6 +35,7 @@ const steps = ['WAITING_FOR_TAKER', 'IN_PROGRESS', 'WAITING_FOR_ACCEPTANCE', 'CO
             {{ taskStatuses[task.status] || task.status }}
           </span>
         </div>
+        <p v-if="task.publicationReviewStatus === 'PENDING'" class="notice" role="status">该任务正在等待发布复核，尚未进入公开任务列表。</p>
         <div class="detail-layout">
           <article class="panel detail-content">
             <h2>任务进度</h2>

@@ -2577,3 +2577,43 @@ input[readonly] {
     grid-template-columns: 1fr;
   }
 }
+.credit-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 18px 22px;
+  margin-bottom: 24px;
+  border: 1px solid #e4d4ae;
+  border-radius: 10px;
+  background: #fffaf0;
+  color: #795c26;
+  line-height: 1.7;
+}
+.credit-notice > div:first-child { flex: 1 1 300px; min-width: 0; }
+.credit-notice p { margin: 5px 0 0; font-size: 12px; }
+.credit-notice.neutral { background: #f4f6f6; border-color: #dde5e4; color: #607371; }
+.credit-notice.restricted { background: #fff4f1; border-color: #edd0c6; color: #93523e; }
+.credit-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.credit-inline-score { margin-left: 12px; font-size: 12px; }
+.credit-detail { margin-top: 24px; }
+.credit-summary { display: grid; grid-template-columns: minmax(140px, .6fr) minmax(240px, 1.5fr) auto; gap: 24px; align-items: center; padding: 24px; }
+.credit-summary p { margin: 7px 0 0; font-size: 12px; line-height: 1.8; }
+.credit-score { margin-right: 10px; font-variant-numeric: tabular-nums; }
+.credit-score.large { font-size: 36px; font-weight: 600; color: #315d49; }
+.credit-badge { display: inline-block; padding: 3px 9px; border-radius: 5px; font-size: 11px; background: #eaf4ed; color: #427755; }
+.credit-badge.EXCELLENT { background: #e2f0e7; color: #2d7149; }
+.credit-badge.WARNING { background: #fff1ce; color: #826021; }
+.credit-badge.RESTRICTED { background: #fbe7e1; color: #9c523e; }
+.credit-review-request { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin: 0 24px 16px; padding: 18px; background: #f6f8f3; border-radius: 8px; }
+.credit-review-request > div { flex: 1; min-width: 180px; overflow-wrap: anywhere; }
+.credit-review-request p { margin: 8px 0; font-size: 12px; }
+.credit-preview { background: #f4f8f2; padding: 12px 15px; border-radius: 7px; font-size: 12px; }
+.credit-table table { min-width: 760px; }
+.credit-table td { max-width: 280px; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .credit-summary { grid-template-columns: 1fr; gap: 16px; padding: 20px; }
+  .credit-notice { padding: 16px; }
+  .credit-review-request { margin-left: 20px; margin-right: 20px; }
+}
