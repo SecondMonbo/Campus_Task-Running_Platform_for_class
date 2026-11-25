@@ -113,9 +113,9 @@ class UserCenterIntegrationTest {
 				.andExpect(jsonPath("$.data.phone").value("13800000000"))
 				.andExpect(jsonPath("$.data.role").value("USER"))
 				.andExpect(jsonPath("$.data.createdAt").isString())
-				// 信誉分展示位：暂无评价时为空，评价数量为 0，creditScore 契约字段待接入。
+				// 信誉分：信用分服务初始化 80 分，评价数量为 0。
 				.andExpect(jsonPath("$.data.rating").doesNotExist())
-				.andExpect(jsonPath("$.data.creditScore").doesNotExist())
+				.andExpect(jsonPath("$.data.creditScore").value(80))
 				.andExpect(jsonPath("$.data.reviewCount").value(0));
 	}
 

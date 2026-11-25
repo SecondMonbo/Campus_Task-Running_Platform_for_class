@@ -23,6 +23,8 @@ export const api = {
   },
   myTasks: (query, signal) => page('/users/me/tasks', query, signal),
   profile: (signal) => get('/users/me/profile', undefined, signal),
+  myCredit: (query, signal) => get('/users/me/credit', query, signal),
+  publicProfile: (userId, signal) => get(`/users/${id(userId)}/profile`, undefined, signal),
   updateProfile: (body) => client.request('/users/me', { method: 'PATCH', body }),
   changePassword: (body) => post('/users/me/password', body),
   tasks: (query, signal) => page('/tasks', query, signal),
