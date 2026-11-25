@@ -193,3 +193,32 @@ cd code\frontend; npm install; npm run dev    # 5173
 
 - 分支 `dev-Rrrr-Wang`，基于 main `7f11396`；只提交 PR，**不合并 main**。
 - 建议提交信息：`feat(credit): 信用分数据表、记分事件与个人中心/他人主页展示`。
+
+---
+
+# 2026-11-25 PR #18 评审修复：并发竞态与低星窗口去重
+
+## 十八、组长指出的两个问题与修法
+
+1. **分值更新丢更新**：两个并发事件可能读到相同旧分，分别写回后其中一次加减分被覆盖；同一事件并发重试还可能在唯一约束上失败并连带回滚外层任务事务。
+2. **30 天低星去重竞态**：先查询窗口内低星数、再保存评价，没有锁住同一发布者/跑腿员组合；并发评价可能都判定自己是窗口内首次低星，重复扣分。
+
+### 修法（按用户行锁串行化）
+
+- `CreditScoreRepository.findByIdForUpdate(userId)`：`@Lock(PESSIMISTIC_WRITE)` 对 `credit_score` 行加 `SELECT ... FOR UPDATE`。
+- `CreditScoreService.ensureAccount` 改走这个锁定查询；`applyEvent` 先按事件查重，拿到用户行锁后**再查一次**记录：并发重复事件在锁上排队，后提交者看到对方已提交的记录后直接返回 `null`（幂等），不会再写库、不会触发唯一约束冲突打断外层任务事务。
+- 新增 `CreditScoreService.acquireAccountLock(userId)`：评价流程在统计 30 天窗口前先锁定跑腿员信用分行，把“窗口判定 + 保存评价 + 记分”整体串到同一把用户锁下；并发评价排队后，后提交者能看到先提交的评价，不会重复判定首次低星。
+- `TaskService.createReview`：窗口计数前先调用 `acquireAccountLock(task.getRunnerId())`。
+
+### 为什么不会互相死锁
+
+锁顺序固定为：任务行（`findByIdForUpdate`）→ 跑腿员信用分行；其他流程只先取任务行、再取信用分行，没有反向“信用分行 → 任务行”的路径。
+
+### 补充测试（`TaskServiceIntegrationTest`）
+
+- `concurrentCreditEventsForSameRunnerDoNotLoseUpdate`：两条不同并发事件同属一个跑腿员，分值应两次都落账（80 → 82），无丢更新。
+- `concurrentDuplicateEventIsIdempotentAndDoesNotBreakOuterTransaction`：同一事件并发重试只记一次、只 +1，无唯一约束异常。
+- `concurrentLowStarReviewsDeductOnlyFirstWithinWindow`：两条并发低星评价，只第一次扣 -3，另一条留痕 0。
+- `lowStarOutsideThirtyDayWindowIsTreatedAsFirstLowStar`：31 天前的旧低星不参与去重，本次仍按首次低星扣分。
+
+修复后回归：后端 **154 tests, 0 failures**；前端 **41 pass**，构建成功；真实 PostgreSQL 上修复版后端启动正常，跑腿员 83 分、3 条记录读取正确。

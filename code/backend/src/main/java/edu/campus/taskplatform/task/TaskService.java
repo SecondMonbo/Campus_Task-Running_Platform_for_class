@@ -308,6 +308,9 @@ public class TaskService {
             throw new TaskException(ErrorCode.DUPLICATE_ACTION, "该任务已被本人评价过");
         }
         Instant now = Instant.now();
+        // 先锁定跑腿员的信用分行，把“30 天窗口判定 + 后续记分”串到同一把用户锁下：
+        // 并发评价在锁上排队，后提交者能看到先提交的评价，不会都判定为窗口内首次低星。
+        creditScoreService.acquireAccountLock(task.getRunnerId());
         // 信用分规则：同一发布者对同一跑腿员滚动 30 天内只有第一次低星评价扣分；
         // 需在保存本次评价前统计窗口内已有的低星评价数量。
         boolean firstLowStar = reviewRepository

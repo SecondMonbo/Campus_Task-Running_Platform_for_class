@@ -80,10 +80,11 @@ public class CreditScoreService {
 
     /**
      * 确保用户已有信用分账户：无则创建 80 分 + 初始化基线记录（变更前为空、变动 0）。
+     * 读取时对 {@code credit_score} 行加悲观写锁，保证后续分值变更在同一用户上串行化。
      */
     @Transactional
     public CreditScore ensureAccount(long userId) {
-        return scoreRepository.findById(userId).orElseGet(() -> {
+        return scoreRepository.findByIdForUpdate(userId).orElseGet(() -> {
             Instant now = Instant.now();
             CreditScore account = scoreRepository.save(new CreditScore(userId, INITIAL_SCORE, now));
             recordRepository.save(new CreditScoreRecord(UUID.randomUUID().toString(), userId,
@@ -91,6 +92,15 @@ public class CreditScoreService {
                     0, 0, null, INITIAL_SCORE, null, now));
             return account;
         });
+    }
+
+    /**
+     * 提前锁定某用户的信用分行，用于把“窗口判定 + 记分”整体串到同一把用户锁下：
+     * 并发评价先在该行锁上排队，后提交的事务能看到先提交的评价，不会重复判定首次低星。
+     */
+    @Transactional
+    public CreditScore acquireAccountLock(long userId) {
+        return ensureAccount(userId);
     }
 
     /** 读取当前分值；未初始化时先补 80 分与基线记录。 */
@@ -102,6 +112,10 @@ public class CreditScoreService {
     /**
      * 记一次信用事件。同一 (eventType, sourceId) 只记一次，重复调用直接返回 null（幂等）。
      *
+     * <p>并发策略：先按事件查重，再对用户信用分行加悲观写锁；拿到锁后二次查重。
+     * 同一用户的并发事件在锁上排队，不会各自读到相同旧分再互相覆盖；同一事件的并发重试
+     * 在锁内看到对方已提交的记录后按幂等结果返回，不重复写库，也不触发外层任务事务回滚。</p>
+     *
      * @param requestedDelta 请求变动值，实际变动按 0–100 截断后计算
      */
     @Transactional
@@ -111,7 +125,15 @@ public class CreditScoreService {
                 && recordRepository.existsByEventTypeAndSourceId(type, sourceId)) {
             return null;
         }
+        // 行锁：同一用户的分值变更在此串行化。
         CreditScore account = ensureAccount(userId);
+        if (sourceId != null && !sourceId.isBlank()) {
+            CreditScoreRecord duplicated = recordRepository
+                    .findByEventTypeAndSourceId(type, sourceId).orElse(null);
+            if (duplicated != null) {
+                return null;
+            }
+        }
         int before = account.getScore();
         int after = Math.max(0, Math.min(100, before + requestedDelta));
         int actual = after - before;

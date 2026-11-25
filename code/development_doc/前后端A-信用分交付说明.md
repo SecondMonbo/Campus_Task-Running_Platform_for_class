@@ -56,7 +56,7 @@
 
 ## 六、验证证据
 
-- 后端：`mvnw.cmd test` → **150 tests, 0 failures, 0 errors, BUILD SUCCESS**（新增 `CreditScoreIntegrationTest` 8 例）。
+- 后端：`mvnw.cmd test` → **154 tests, 0 failures, 0 errors, BUILD SUCCESS**（含并发/窗口修复后新增 4 个用例；`CreditScoreIntegrationTest` 8 例）。
 - 前端：`npm test` → **41 pass, 0 fail**；`npm run build` 成功。
 - Flyway（PostgreSQL 18.6）：`Successfully applied 3 migrations`，schema 至 `v2026111802`。
 - HTTP E2E（`credit_e2e.ps1` / `credit_e2e_out.txt`）：
@@ -69,14 +69,22 @@
 - 数据库核对：`credit_score` 为 `(1,80)(2,80)(3,83)`；2 条 `CREDIT` 通知；约束含 `CREDIT`。
 - 浏览器：个人中心信用分与记录、发布者主页弹窗（`credit_profile.png`、`credit_profile_records.png`、`credit_public_profile.png`）。
 
-## 七、实现边界（未做，避免误读）
+## 七、并发与幂等修复（PR #18 评审意见）
+
+- **丢更新防护**：`credit_score` 按用户加悲观写锁（`SELECT ... FOR UPDATE`），同一用户的并发事件在锁上排队，不会各自读到相同旧分再互相覆盖；分值与记录在同一事务写入。
+- **重复事件幂等**：`applyEvent` 先查重，拿到用户行锁后二次查重；并发重试看到对方已提交记录即按幂等结果返回，不重复写库，也不触发唯一约束冲突、不回滚外层任务事务。
+- **低星窗口并发安全**：评价在统计 30 天窗口前先锁定跑腿员信用分行，窗口判定、评价保存与记分在同一把用户锁下串行化；窗口内并发低星只有第一次扣 -3。
+- **锁顺序**：任务行 → 信用分行，无反向路径，避免死锁。
+- 补充测试：并发不同事件不丢更新、并发重复事件只记一次、并发低星只扣一次、超出 30 天窗口的旧评价不参与去重。
+
+## 八、实现边界（未做，避免误读）
 
 - `<60` 禁止接普通任务、发布进复核队列：只返回档位与提示文案，未接入任务流程拦截。
 - 投诉成立扣分 / 管理员复核调整 / 取消责任方扣分 / 连续 10 单恢复：未接入。
 - 信用分事件异步重试与死信队列：未引入，分值与记录同事务写入。
 - 任务列表预警档排序规则：未实现。
 
-## 八、Review 建议入口
+## 九、Review 建议入口
 
 1. `code/backend/src/main/java/edu/campus/taskplatform/credit/`（新增包）。
 2. `TaskService` 的 `createReview` / `deliverTask` / `completeTask` 三处调用。
