@@ -56,6 +56,11 @@ public class CreditScoreService {
 	/** 低星扣分的滚动窗口。 */
 	public static final Duration LOW_STAR_WINDOW = Duration.ofDays(30);
 
+	private static final String RESTRICTED_PERMISSION_HINT =
+			"信用受限，暂不可接取普通任务；新发布任务需管理员复核后公开。";
+	private static final String RESTRICTED_RECOVERY_HINT =
+			"连续完成 10 个任务且期间无负向信用事件后，分值恢复至 75，并解除接单限制。";
+
 	private final CreditScoreRepository scoreRepository;
 	private final CreditScoreRecordRepository recordRepository;
 	private final AppUserRepository userRepository;
@@ -215,8 +220,15 @@ public class CreditScoreService {
 				Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "recordId")));
 		Page<CreditScoreRecord> result = recordRepository.findByUserId(userId, pageable);
 		List<CreditRecordDto> items = result.getContent().stream().map(CreditRecordDto::from).toList();
+		// 限制状态是独立持久化的：60–74 分但曾低于 60 的用户仍然受限，不能只看档位文案。
+		String permissionHint = account.isRestricted()
+				? RESTRICTED_PERMISSION_HINT
+				: tier.permissionHint();
+		String recoveryHint = account.isRestricted()
+				? RESTRICTED_RECOVERY_HINT
+				: tier.recoveryHint();
 		return new MyCreditDto(account.getScore(), tier.name(), tier.label(),
-				tier.permissionHint(), tier.recoveryHint(),
+				permissionHint, recoveryHint,
 				PageResult.of(items, page, size, result.getTotalElements()));
 	}
 

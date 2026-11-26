@@ -158,6 +158,10 @@ class CreditScoreIntegrationTest {
         creditScoreService.adjustByAdmin(restricted.getUserId(), 1, "复核调整", admin.getUserId());
         assertEquals(60, scoreOf(restricted));
         assertTrue(reload(restricted).isRestricted());
+        // 60 分档位是预警，但持久化限制仍生效，本人页文案不能误报“可正常接单”。
+        var restrictedView = creditScoreService.myCredit(restricted.getUserId(), 0, 10);
+        assertEquals(CreditTier.WARNING.name(), restrictedView.tier());
+        assertTrue(restrictedView.permissionHint().contains("受限"));
 
         TaskView pending = taskService.createTask(current(restricted), taskRequest(10));
         assertEquals(PublicationReviewStatus.PENDING_REVIEW, pending.getPublicationReviewStatus());
@@ -182,6 +186,8 @@ class CreditScoreIntegrationTest {
         creditScoreService.adjustByAdmin(restricted.getUserId(), 15, "恢复", admin.getUserId());
         assertEquals(75, scoreOf(restricted));
         assertFalse(reload(restricted).isRestricted());
+        assertTrue(creditScoreService.myCredit(restricted.getUserId(), 0, 10)
+                .permissionHint().contains("正常"));
         TaskView normalPublish = taskService.createTask(current(restricted), taskRequest(10));
         assertEquals(PublicationReviewStatus.NOT_REQUIRED, normalPublish.getPublicationReviewStatus());
     }
