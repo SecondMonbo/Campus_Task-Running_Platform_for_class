@@ -39,18 +39,6 @@ public class AppUser {
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
 
-	/** 信用分，取值 0–100；新用户初始化为 80。与钱包虚拟币相互独立。 */
-	@Column(name = "credit_score", nullable = false)
-	private int creditScore = 80;
-
-	/** 低分限制状态：分数低于 60 时开启，恢复至 75 及以上才解除。 */
-	@Column(name = "credit_restricted", nullable = false)
-	private boolean creditRestricted;
-
-	/** 连续完成且期间没有负向信用事件的任务数，用于恢复至 75 分。 */
-	@Column(name = "consecutive_completed_tasks", nullable = false)
-	private int consecutiveCompletedTasks;
-
 	protected AppUser() {
 	}
 
@@ -61,9 +49,6 @@ public class AppUser {
 		this.phone = phone;
 		this.role = AppUserRole.USER;
 		this.createdAt = createdAt;
-		this.creditScore = 80;
-		this.creditRestricted = false;
-		this.consecutiveCompletedTasks = 0;
 	}
 
 	public Long getUserId() {
@@ -92,25 +77,6 @@ public class AppUser {
 
 	public Instant getCreatedAt() {
 		return createdAt;
-	}
-
-	public int getCreditScore() {
-		return creditScore;
-	}
-
-	public boolean isCreditRestricted() {
-		return creditRestricted;
-	}
-
-	public int getConsecutiveCompletedTasks() {
-		return consecutiveCompletedTasks;
-	}
-
-	/** 信用分服务：整行更新分数、限制状态与连续完成计数。 */
-	public void updateCredit(int creditScore, boolean creditRestricted, int consecutiveCompletedTasks) {
-		this.creditScore = creditScore;
-		this.creditRestricted = creditRestricted;
-		this.consecutiveCompletedTasks = consecutiveCompletedTasks;
 	}
 
 	/** 用户中心：更新个人资料。显示名与手机号由调用方完成校验和清洗。 */

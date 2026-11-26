@@ -2,10 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { notificationTypes, validateSystemNotification } from '../src/domain/notifications.js'
 
-test('系统通知与任务通知使用不同展示标签', () => {
+test('系统通知、任务通知与信用分通知使用不同展示标签', () => {
   assert.equal(notificationTypes.TASK, '任务通知')
   assert.equal(notificationTypes.SYSTEM, '系统通知')
+  assert.equal(notificationTypes.CREDIT, '信用分通知')
   assert.notEqual(notificationTypes.TASK, notificationTypes.SYSTEM)
+  assert.notEqual(notificationTypes.CREDIT, notificationTypes.TASK)
 })
 
 test('系统通知表单去除首尾空白后校验标题和内容', () => {

@@ -2,29 +2,24 @@ package edu.campus.taskplatform.credit.dto;
 
 import java.time.Instant;
 
-import edu.campus.taskplatform.credit.CreditEventType;
-import edu.campus.taskplatform.credit.CreditRecord;
+import edu.campus.taskplatform.credit.CreditScoreRecord;
 
-/** 信用分变更记录视图；所有 ID 按字符串输出。 */
+/** 单条信用分变更记录（本人与管理员可见；他人主页不返回）。 */
 public record CreditRecordDto(
 		String recordId,
-		String userId,
-		CreditEventType eventType,
-		String sourceId,
+		String eventType,
+		String eventLabel,
 		String reason,
 		int requestedDelta,
 		int actualDelta,
 		Integer scoreBefore,
 		int scoreAfter,
-		String adminId,
 		Instant createdAt) {
 
-	public static CreditRecordDto from(CreditRecord record) {
-		return new CreditRecordDto(record.getRecordId().toString(), record.getUserId().toString(),
-				record.getEventType(), record.getSourceId(), record.getReason(),
-				record.getRequestedDelta(), record.getActualDelta(), record.getScoreBefore(),
-				record.getScoreAfter(),
-				record.getAdminId() == null ? null : record.getAdminId().toString(),
+	public static CreditRecordDto from(CreditScoreRecord record) {
+		return new CreditRecordDto(record.getRecordId(), record.getEventType().name(),
+				record.getEventType().label(), record.getReason(), record.getRequestedDelta(),
+				record.getActualDelta(), record.getScoreBefore(), record.getScoreAfter(),
 				record.getCreatedAt());
 	}
 }

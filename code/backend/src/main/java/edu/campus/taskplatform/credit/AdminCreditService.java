@@ -25,13 +25,13 @@ public class AdminCreditService {
 		this.currentUserService = currentUserService;
 	}
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public CreditSummaryDto summary(long userId) {
 		currentUserService.requireAdmin();
 		return creditScoreService.summary(userId);
 	}
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public PageResult<CreditRecordDto> records(long userId, int page, int size) {
 		currentUserService.requireAdmin();
 		return creditScoreService.records(userId, page, size);

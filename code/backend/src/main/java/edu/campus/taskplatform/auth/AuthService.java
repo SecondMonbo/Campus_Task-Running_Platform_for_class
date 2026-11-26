@@ -42,7 +42,8 @@ public class AuthService {
 			throw new TaskException(ErrorCode.DUPLICATE_ACTION, "用户名已被使用");
 		}
 		accountingService.openAccount(user.getUserId(), INITIAL_WALLET_BALANCE);
-		creditScoreService.initialize(user);
+		// 新注册用户信用分初始化为 80 分，并写入初始化基线记录。
+		creditScoreService.ensureAccount(user.getUserId());
 		return AuthUserDto.from(user);
 	}
 

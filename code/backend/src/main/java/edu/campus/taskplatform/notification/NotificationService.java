@@ -72,8 +72,17 @@ public class NotificationService {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void notify(Long userId, String title, String content, String relatedTaskId) {
+        notify(userId, NotificationType.TASK, title, content, relatedTaskId);
+    }
+
+    /**
+     * 按指定类型写入通知（任务进度、系统通知、信用分变动）。独立事务，失败不影响业务主流程。
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void notify(Long userId, NotificationType type, String title, String content,
+                       String relatedTaskId) {
         Notification notification = new Notification(UUID.randomUUID().toString(), userId,
-                NotificationType.TASK, title, content, relatedTaskId, Instant.now());
+                type, title, content, relatedTaskId, Instant.now());
         repository.save(notification);
     }
 

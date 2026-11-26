@@ -78,7 +78,8 @@ public class CreditEventProcessor {
 				if (event == null || event.getStatus() == CreditEventStatus.PROCESSED) {
 					return;
 				}
-				creditScoreService.applyEvent(event);
+				creditScoreService.applyEvent(event.getUserId(), event.getEventType(),
+						event.getSourceId(), event.getRequestedDelta(), event.getReason());
 				event.markProcessed(Instant.now());
 				eventRepository.save(event);
 			});

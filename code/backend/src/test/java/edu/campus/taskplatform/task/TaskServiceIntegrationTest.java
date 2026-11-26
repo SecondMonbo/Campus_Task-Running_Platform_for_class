@@ -4,10 +4,18 @@ import edu.campus.taskplatform.accounting.AccountingService;
 import edu.campus.taskplatform.accounting.WalletAccount;
 import edu.campus.taskplatform.accounting.WalletAccountRepository;
 import edu.campus.taskplatform.accounting.WalletTransactionRepository;
+import edu.campus.taskplatform.auth.AppUser;
+import edu.campus.taskplatform.auth.AppUserRepository;
 import edu.campus.taskplatform.auth.CurrentUser;
 import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
+import edu.campus.taskplatform.credit.CreditEventRepository;
+import edu.campus.taskplatform.credit.CreditEventType;
+import edu.campus.taskplatform.credit.CreditScoreRecord;
+import edu.campus.taskplatform.credit.CreditScoreRecordRepository;
+import edu.campus.taskplatform.credit.CreditScoreRepository;
+import edu.campus.taskplatform.credit.CreditScoreService;
 import edu.campus.taskplatform.task.dto.CreateReviewRequest;
 import edu.campus.taskplatform.task.dto.TaskCreateRequest;
 import edu.campus.taskplatform.task.dto.TaskReviewView;
@@ -18,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
@@ -25,6 +34,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -44,7 +54,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 @SpringBootTest
 @ActiveProfiles("test")
-@TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
+@TestPropertySource(properties = {
+        "spring.jpa.hibernate.ddl-auto=create-drop",
+        "credit.events.auto-process=true",
+        "credit.events.retry-enabled=false"
+})
 class TaskServiceIntegrationTest {
 
     @Autowired
@@ -68,11 +82,29 @@ class TaskServiceIntegrationTest {
     @Autowired
     TaskReviewRepository reviewRepository;
 
+    @Autowired
+    AppUserRepository userRepository;
+
+    @Autowired
+    CreditScoreService creditScoreService;
+
+    @Autowired
+    CreditScoreRecordRepository creditRecordRepository;
+
+    @Autowired
+    CreditScoreRepository creditScoreRepository;
+
+    @Autowired
+    CreditEventRepository creditEventRepository;
+
     private CurrentUser publisher;
     private CurrentUser runner;
 
     @BeforeEach
     void setUp() {
+        creditEventRepository.deleteAll();
+        creditRecordRepository.deleteAll();
+        creditScoreRepository.deleteAll();
         reviewRepository.deleteAll();
         operationLogRepository.deleteAll();
         taskRepository.deleteAll();
@@ -340,6 +372,151 @@ class TaskServiceIntegrationTest {
         }
     }
 
+    // ---------------- 信用分并发与时间窗口 ----------------
+
+    @Test
+    void concurrentCreditEventsForSameRunnerDoNotLoseUpdate() throws Exception {
+        Pair pair = newPair();
+        long runnerId = pair.runner().getUserId();
+        assertEquals(80, creditScoreService.scoreOf(runnerId));
+
+        int threads = 2;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch go = new CountDownLatch(1);
+        List<Future<Void>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < threads; i++) {
+                final String source = "concurrent-on-time-" + i;
+                futures.add(pool.submit(() -> {
+                    ready.countDown();
+                    go.await();
+                    creditScoreService.applyEvent(runnerId, CreditEventType.ON_TIME_COMPLETION,
+                            source, 1, "并发按时完成");
+                    return null;
+                }));
+            }
+            ready.await();
+            go.countDown();
+            for (Future<Void> future : futures) {
+                future.get();
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // 两条不同事件都应落账：没有发生旧分覆盖导致的丢更新。
+        assertEquals(82, creditScoreService.scoreOf(runnerId));
+        List<CreditScoreRecord> records = creditRecordRepository
+                .findByUserId(runnerId, PageRequest.of(0, 20)).getContent();
+        assertEquals(3, records.size());
+    }
+
+    @Test
+    void concurrentDuplicateEventIsIdempotentAndDoesNotBreakOuterTransaction() throws Exception {
+        Pair pair = newPair();
+        long runnerId = pair.runner().getUserId();
+        String duplicateSource = "concurrent-duplicate-task";
+        // 预热信用分账户，并发测试只聚焦同一事件的幂等处理。
+        assertEquals(80, creditScoreService.scoreOf(runnerId));
+
+        int threads = 2;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch go = new CountDownLatch(1);
+        List<Future<Void>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < threads; i++) {
+                futures.add(pool.submit(() -> {
+                    ready.countDown();
+                    go.await();
+                    creditScoreService.applyEvent(runnerId, CreditEventType.ON_TIME_COMPLETION,
+                            duplicateSource, 1, "并发重复事件");
+                    return null;
+                }));
+            }
+            ready.await();
+            go.countDown();
+            for (Future<Void> future : futures) {
+                future.get();
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // 同一事件并发重试只记一次，分值只 +1，且没有抛唯一约束冲突打断外层事务。
+        assertEquals(81, creditScoreService.scoreOf(runnerId));
+        List<CreditScoreRecord> records = creditRecordRepository
+                .findByUserId(runnerId, PageRequest.of(0, 20)).getContent();
+        assertEquals(2, records.size());
+    }
+
+    @Test
+    void concurrentLowStarReviewsDeductOnlyFirstWithinWindow() throws Exception {
+        Pair pair = newPair();
+        String task1 = completedTaskBetween(pair.publisherUser(), pair.runnerUser());
+        String task2 = completedTaskBetween(pair.publisherUser(), pair.runnerUser());
+
+        CreateReviewRequest req = new CreateReviewRequest();
+        req.setScore(2);
+        req.setContent("并发低星");
+
+        int threads = 2;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch go = new CountDownLatch(1);
+        List<Future<TaskReview>> outcomes = new ArrayList<>();
+        try {
+            outcomes.add(pool.submit(() -> {
+                ready.countDown();
+                go.await();
+                return taskService.createReview(pair.publisherUser(), task1, req);
+            }));
+            outcomes.add(pool.submit(() -> {
+                ready.countDown();
+                go.await();
+                return taskService.createReview(pair.publisherUser(), task2, req);
+            }));
+            ready.await();
+            go.countDown();
+            for (Future<TaskReview> outcome : outcomes) {
+                outcome.get();
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        long runnerId = pair.runner().getUserId();
+        assertEquals(2, reviewRepository.count());
+        // 两个任务各按时 +1（共 +2），30 天窗口内两条并发低星只有第一次扣 -3，另一条仅留痕 0。
+        assertEquals(79, creditScoreService.scoreOf(runnerId));
+        long negativeCount = creditRecordRepository.findAll().stream()
+                .filter(record -> record.getUserId().equals(runnerId)
+                        && record.getEventType() == CreditEventType.REVIEW_LOW_STAR
+                        && record.getActualDelta() == -3)
+                .count();
+        assertEquals(1, negativeCount);
+    }
+
+    @Test
+    void lowStarOutsideThirtyDayWindowIsTreatedAsFirstLowStar() {
+        Pair pair = newPair();
+        long runnerId = pair.runner().getUserId();
+        String oldTask = completedTaskBetween(pair.publisherUser(), pair.runnerUser());
+        Instant thirtyOneDaysAgo = Instant.now().minus(31, ChronoUnit.DAYS);
+        reviewRepository.saveAndFlush(new TaskReview(UUID.randomUUID().toString(), oldTask,
+                pair.publisher().getUserId(), runnerId, 2, "31 天前的低星评价", thirtyOneDaysAgo));
+
+        String newTask = completedTaskBetween(pair.publisherUser(), pair.runnerUser());
+        CreateReviewRequest req = new CreateReviewRequest();
+        req.setScore(2);
+        req.setContent("窗口外后的新低星");
+        taskService.createReview(pair.publisherUser(), newTask, req);
+
+        // 两个任务各按时 +1（共 +2）；超出 30 天滚动窗口的旧低星不参与去重，本次仍按首次低星扣 -3。
+        assertEquals(79, creditScoreService.scoreOf(runnerId));
+    }
+
     // ---------------- 并发接单 ----------------
 
     @Test
@@ -423,5 +600,29 @@ class TaskServiceIntegrationTest {
         String taskId = deliveredTask();
         taskService.completeTask(publisher, taskId);
         return taskId;
+    }
+
+    private record Pair(AppUser publisher, AppUser runner,
+                        CurrentUser publisherUser, CurrentUser runnerUser) {
+    }
+
+    private Pair newPair() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        AppUser pub = userRepository.saveAndFlush(new AppUser("cpub-" + suffix, "x", "发布者", null, Instant.now()));
+        AppUser run = userRepository.saveAndFlush(new AppUser("crun-" + suffix, "x", "跑腿员", null, Instant.now()));
+        walletAccountRepository.saveAndFlush(new WalletAccount(pub.getUserId(), 5000, 0));
+        walletAccountRepository.saveAndFlush(new WalletAccount(run.getUserId(), 5000, 0));
+        return new Pair(pub, run,
+                new CurrentUser(pub.getUserId(), "USER"),
+                new CurrentUser(run.getUserId(), "USER"));
+    }
+
+    private String completedTaskBetween(CurrentUser pub, CurrentUser run) {
+        TaskCreateRequest req = request("信用分并发任务", 30);
+        TaskView created = taskService.createTask(pub, req);
+        taskService.acceptTask(run, created.getTaskId());
+        taskService.deliverTask(run, created.getTaskId());
+        taskService.completeTask(pub, created.getTaskId());
+        return created.getTaskId();
     }
 }

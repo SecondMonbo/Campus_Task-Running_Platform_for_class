@@ -2,11 +2,11 @@ package edu.campus.taskplatform.task;
 
 import edu.campus.taskplatform.accounting.AccountingService;
 import edu.campus.taskplatform.accounting.InsufficientBalanceException;
-import edu.campus.taskplatform.auth.AppUser;
 import edu.campus.taskplatform.auth.CurrentUser;
 import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.credit.CreditEventPublisher;
 import edu.campus.taskplatform.credit.CreditEventType;
+import edu.campus.taskplatform.credit.CreditScore;
 import edu.campus.taskplatform.credit.CreditScoreService;
 import edu.campus.taskplatform.notification.NotificationService;
 import edu.campus.taskplatform.common.PageResult;
@@ -17,9 +17,9 @@ import edu.campus.taskplatform.task.dto.TaskUpdateRequest;
 import edu.campus.taskplatform.task.dto.TaskView;
 import edu.campus.taskplatform.task.dto.WithdrawalRequest;
 import jakarta.persistence.criteria.Expression;
-import jakarta.persistence.criteria.Join;
-import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -285,6 +285,8 @@ public class TaskService {
         task.setDeliveredAt(Instant.now());
         taskRepository.save(task);
         writeLog(taskId, runner.userId(), "DELIVER", "确认送达");
+        // 信用分：送达时间晚于截止 24 小时记 -5；截止后 24 小时内不加不扣（按任务 ID 幂等）。
+        publishOvertimeDeliveryEvent(task);
         safeNotify(task.getPublisherId(), "任务已送达",
                 "「" + task.getTitle() + "」已确认送达，请及时验收。", taskId);
         return TaskView.from(task);
@@ -315,6 +317,8 @@ public class TaskService {
         doSettle(taskId, publisher.userId(), runnerId, reward);
         taskRepository.save(task);
         writeLog(taskId, publisher.userId(), "COMPLETE", "确认完成，报酬=" + reward + " 结算给跑腿员");
+        // 信用分：截止前送达 +1；截止后 24 小时内只累计连续履约；超时 24 小时以上 -5。
+        // 均按任务 ID 幂等，与送达时的超时事件共用唯一键。
         publishCompletionCreditEvent(task, runnerId);
         safeNotify(runnerId, "任务已完成",
                 "「" + task.getTitle() + "」已完成，报酬 " + reward + " 虚拟币已结算到你的钱包。", taskId);
@@ -339,7 +343,16 @@ public class TaskService {
             throw new TaskException(ErrorCode.DUPLICATE_ACTION, "该任务已被本人评价过");
         }
         Instant now = Instant.now();
+        // 先锁定跑腿员的信用分行，把“30 天窗口判定 + 记分”串到同一把用户锁下：
+        // 并发评价在锁上排队，后提交者能看到先提交的评价，不会都判定为窗口内首次低星。
+        creditScoreService.acquireAccountLock(task.getRunnerId());
         int score = req.getScore();
+        // 信用分规则：同一发布者对同一跑腿员滚动 30 天内只有第一次低星评价扣分；
+        // 需在保存本次评价前统计窗口内已有的低星评价数量。
+        boolean firstLowStar = reviewRepository
+                .countByReviewerIdAndRevieweeIdAndScoreLessThanEqualAndCreatedAtAfter(
+                        publisher.userId(), task.getRunnerId(), 2,
+                        now.minus(CreditScoreService.LOW_STAR_WINDOW)) == 0;
         CreditEventType eventType;
         int delta;
         String reason;
@@ -349,18 +362,14 @@ public class TaskService {
             reason = "收到 5 星评价";
         }
         else if (score >= 3) {
-            eventType = CreditEventType.REVIEW_3_4_STAR;
+            eventType = CreditEventType.REVIEW_NEUTRAL;
             delta = 0;
             reason = "收到 " + score + " 星评价";
         }
         else {
-            // 同一评价人对同一跑腿员的滚动 30 天内，仅首次低星评价扣分。
-            long recentLowStars = reviewRepository
-                    .countByReviewerIdAndRevieweeIdAndScoreLessThanEqualAndCreatedAtGreaterThanEqual(
-                            publisher.userId(), task.getRunnerId(), 2, now.minus(Duration.ofDays(30)));
             eventType = CreditEventType.REVIEW_LOW_STAR;
-            delta = recentLowStars == 0 ? -3 : 0;
-            reason = recentLowStars == 0
+            delta = firstLowStar ? -3 : 0;
+            reason = firstLowStar
                     ? "收到 " + score + " 星评价（30 天内首次低星评价）"
                     : "收到 " + score + " 星评价（30 天内已扣过低星评价分）";
         }
@@ -368,6 +377,7 @@ public class TaskService {
                 publisher.userId(), task.getRunnerId(), score, req.getContent(), now);
         reviewRepository.save(review);
         writeLog(taskId, publisher.userId(), "REVIEW", "提交评价");
+        // 业务事务只写 outbox；提交后消费一次，失败保留重试。以评价 ID 幂等。
         creditEvents.publish(task.getRunnerId(), eventType, review.getReviewId(), delta, reason);
         safeNotify(task.getRunnerId(), "收到新的评价",
                 "你的任务「" + task.getTitle() + "」收到发布者评价，评分 " + req.getScore() + " 星。", taskId);
@@ -404,26 +414,40 @@ public class TaskService {
         int delta;
         String reason;
         if (deliveredAt == null) {
-            eventType = CreditEventType.TASK_COMPLETED_IN_WINDOW;
+            eventType = CreditEventType.COMPLETION_IN_GRACE;
             delta = 0;
             reason = "任务完成（缺少送达时间，不计按时或超时）";
         }
         else if (!deliveredAt.isAfter(task.getDeadline())) {
-            eventType = CreditEventType.TASK_COMPLETED_ON_TIME;
+            eventType = CreditEventType.ON_TIME_COMPLETION;
             delta = 1;
             reason = "按时完成任务";
         }
-        else if (deliveredAt.isAfter(task.getDeadline().plus(Duration.ofHours(24)))) {
-            eventType = CreditEventType.TASK_COMPLETED_LATE;
+        else if (isOvertime(task)) {
+            eventType = CreditEventType.OVERTIME_DELIVERY;
             delta = -5;
             reason = "超过截止时间 24 小时送达";
         }
         else {
-            eventType = CreditEventType.TASK_COMPLETED_IN_WINDOW;
+            eventType = CreditEventType.COMPLETION_IN_GRACE;
             delta = 0;
             reason = "任务完成（截止后 24 小时内送达）";
         }
         creditEvents.publish(runnerId, eventType, task.getTaskId(), delta, reason);
+    }
+
+    /** 送达即超时 24 小时：立即写 -5 事件；确认完成时再写一次会按 (类型, 任务 ID) 幂等忽略。 */
+    private void publishOvertimeDeliveryEvent(Task task) {
+        if (task.getRunnerId() == null || !isOvertime(task)) {
+            return;
+        }
+        creditEvents.publish(task.getRunnerId(), CreditEventType.OVERTIME_DELIVERY,
+                task.getTaskId(), -5, "超过截止时间 24 小时送达");
+    }
+
+    private static boolean isOvertime(Task task) {
+        return task.getDeliveredAt() != null
+                && task.getDeliveredAt().isAfter(task.getDeadline().plus(Duration.ofHours(24)));
     }
 
     private void writeLog(String taskId, Long actorId, String action, String detail) {
@@ -502,9 +526,14 @@ public class TaskService {
                         cb.like(cb.lower(root.get("deliveryLocation")), like)));
             }
             if (query != null) {
-                Join<Task, AppUser> publisher = root.join("publisher", JoinType.LEFT);
+                // 预警档（60–74）发布者的任务排在非预警档之后；信用分以 credit_score 表为准。
+                Subquery<Integer> warningPublisher = query.subquery(Integer.class);
+                Root<CreditScore> credit = warningPublisher.from(CreditScore.class);
+                warningPublisher.select(cb.literal(1)).where(
+                        cb.equal(credit.get("userId"), root.get("publisherId")),
+                        cb.between(credit.get("score"), 60, 74));
                 Expression<Integer> warningTier = cb.<Integer>selectCase()
-                        .when(cb.between(publisher.get("creditScore"), 60, 74), 1)
+                        .when(cb.exists(warningPublisher), 1)
                         .otherwise(0);
                 query.orderBy(
                         cb.asc(warningTier),

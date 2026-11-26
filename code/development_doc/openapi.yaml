@@ -266,6 +266,57 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /api/v1/users/me/credit:
+    get:
+      tags: [Users]
+      summary: 查看本人信用分与变更记录
+      description: 返回精确分值（0-100）、档位、权限与恢复说明，以及变更记录分页。
+      operationId: getMyCredit
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 本人信用分概览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyCreditResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/users/{userId}/profile:
+    get:
+      tags: [Users]
+      summary: 查看他人主页（基本信息与信用档位）
+      description: 仅返回基本信息、信用档位与累计完成单数；不返回精确分值与变更明细。
+      operationId: getPublicUserProfile
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 他人主页信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicUserProfileResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
   /api/v1/tasks:
     get:
       tags: [Tasks]
@@ -1004,46 +1055,6 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
-  /api/v1/users/me/credit:
-    get:
-      tags: [Credit]
-      summary: 查询本人信用分
-      description: 返回本人精确分数、档位、低分限制状态、权限说明、恢复条件与连续履约计数。身份来自登录会话。
-      operationId: getMyCreditSummary
-      responses:
-        '200':
-          description: 本人信用分摘要
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreditSummaryResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/ServerError'
-
-  /api/v1/users/me/credit/records:
-    get:
-      tags: [Credit]
-      summary: 查询本人信用分变更记录
-      operationId: listMyCreditRecords
-      parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/Size'
-      responses:
-        '200':
-          description: 分页变更记录
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreditRecordPageResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/ServerError'
-
   /api/v1/admin/users/{userId}/credit:
     parameters:
       - name: userId
@@ -1651,7 +1662,7 @@ components:
           type: integer
           minimum: 0
           maximum: 100
-          description: 当前信用分；新用户初始化为 80，与钱包虚拟币相互独立。
+          description: 本人信用分（0-100），初始 80；由信用分服务统一维护，越界按边界截断。
 
     UserProfileResponse:
       allOf:
@@ -1664,18 +1675,18 @@ components:
     CreditTier:
       type: string
       enum: [EXCELLENT, GOOD, WARNING, RESTRICTED]
-      description: 90–100 优秀、75–89 良好、60–74 预警、0–59 受限。
+      description: 90–100 优秀、75–89 良好、60–74 预警、0–59 受限；恰为 60 分不受限，恰为 75 分视为已解除。
 
     CreditEventType:
       type: string
       enum:
         - INITIALIZATION
         - REVIEW_5_STAR
-        - REVIEW_3_4_STAR
+        - REVIEW_NEUTRAL
         - REVIEW_LOW_STAR
-        - TASK_COMPLETED_ON_TIME
-        - TASK_COMPLETED_IN_WINDOW
-        - TASK_COMPLETED_LATE
+        - ON_TIME_COMPLETION
+        - COMPLETION_IN_GRACE
+        - OVERTIME_DELIVERY
         - RESPONSIBLE_CANCELLATION
         - COMPLAINT_UPHELD
         - CONSECUTIVE_COMPLETION_RECOVERY
@@ -1720,23 +1731,22 @@ components:
 
     CreditRecord:
       type: object
-      required: [recordId, userId, eventType, sourceId, reason, requestedDelta, actualDelta, scoreAfter, createdAt]
+      required: [recordId, eventType, eventLabel, reason, requestedDelta, actualDelta, scoreAfter, createdAt]
       properties:
         recordId:
           type: string
-        userId:
-          type: string
         eventType:
           $ref: '#/components/schemas/CreditEventType'
-        sourceId:
+        eventLabel:
           type: string
-          description: 触发该记录的业务资源编号；初始化记录为 user:<userId>。
+          description: 事件类型的中文展示名。
         reason:
           type: string
         requestedDelta:
           type: integer
         actualDelta:
           type: integer
+          description: 截断后的实际变动值；0 表示仅留痕。
         scoreBefore:
           type: [integer, 'null']
           minimum: 0
@@ -1746,8 +1756,6 @@ components:
           type: integer
           minimum: 0
           maximum: 100
-        adminId:
-          type: [string, 'null']
         createdAt:
           type: string
           format: date-time
@@ -1766,6 +1774,71 @@ components:
                       type: array
                       items:
                         $ref: '#/components/schemas/CreditRecord'
+
+    MyCredit:
+      type: object
+      required: [score, tier, tierLabel, permissionHint, recoveryHint, records]
+      properties:
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        tier:
+          $ref: '#/components/schemas/CreditTier'
+        tierLabel:
+          type: string
+        permissionHint:
+          type: string
+        recoveryHint:
+          type: string
+        records:
+          allOf:
+            - $ref: '#/components/schemas/PageInfo'
+            - type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/CreditRecord'
+
+    MyCreditResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/MyCredit'
+
+    PublicUserProfile:
+      type: object
+      required: [userId, displayName, role, creditTier, creditTierLabel, completedTasks]
+      description: 他人主页只展示基本信息与信用档位，不含精确分值与变更明细。
+      properties:
+        userId:
+          type: string
+        displayName:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+        creditTier:
+          $ref: '#/components/schemas/CreditTier'
+        creditTierLabel:
+          type: string
+        completedTasks:
+          type: integer
+          minimum: 0
+          description: 作为跑腿员累计完成的任务数。
+        memberSince:
+          type: string
+          format: date-time
+
+    PublicUserProfileResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/PublicUserProfile'
 
     CreditAdjustmentRequest:
       type: object

@@ -1,6 +1,6 @@
 package edu.campus.taskplatform.credit.dto;
 
-import edu.campus.taskplatform.auth.AppUser;
+import edu.campus.taskplatform.credit.CreditScore;
 import edu.campus.taskplatform.credit.CreditTier;
 
 /**
@@ -21,9 +21,9 @@ public record CreditSummaryDto(
 	public static final String RECOVERY_CONDITION =
 			"连续完成 10 个任务且期间没有负向信用事件，可恢复至 75 分；达到 75 分自动解除低分限制。";
 
-	public static CreditSummaryDto from(AppUser user) {
-		CreditTier tier = CreditTier.fromScore(user.getCreditScore());
-		boolean restricted = user.isCreditRestricted();
+	public static CreditSummaryDto from(CreditScore account) {
+		CreditTier tier = CreditTier.fromScore(account.getScore());
+		boolean restricted = account.isRestricted();
 		String notice;
 		if (restricted) {
 			notice = "信用分受限：不能接取普通任务，新发布任务需管理员复核；恢复至 75 分解除限制。";
@@ -34,8 +34,8 @@ public record CreditSummaryDto(
 		else {
 			notice = null;
 		}
-		return new CreditSummaryDto(user.getUserId().toString(), user.getCreditScore(), tier,
-				restricted, !restricted, restricted, user.getConsecutiveCompletedTasks(),
+		return new CreditSummaryDto(account.getUserId().toString(), account.getScore(), tier,
+				restricted, !restricted, restricted, account.getConsecutiveCompletedTasks(),
 				notice, RECOVERY_CONDITION);
 	}
 }
