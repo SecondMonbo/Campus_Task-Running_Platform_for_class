@@ -63,7 +63,7 @@ public class TaskController {
     // 任务详情
     @GetMapping("/tasks/{taskId}")
     public ApiResponse<TaskView> getTask(@PathVariable String taskId) {
-        return ApiResponse.ok(taskService.getTask(taskId));
+        return ApiResponse.ok(taskService.getTask(current(), taskId));
     }
 
     // 修改待接单任务

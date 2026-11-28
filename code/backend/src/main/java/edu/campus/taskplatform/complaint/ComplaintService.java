@@ -2,6 +2,7 @@ package edu.campus.taskplatform.complaint;
 
 import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 import edu.campus.taskplatform.auth.AppUserRepository;
@@ -12,6 +13,8 @@ import edu.campus.taskplatform.common.TaskException;
 import edu.campus.taskplatform.common.web.Pagination;
 import edu.campus.taskplatform.complaint.dto.ComplaintActionRequest;
 import edu.campus.taskplatform.complaint.dto.CreateComplaintRequest;
+import edu.campus.taskplatform.credit.CreditEventPublisher;
+import edu.campus.taskplatform.credit.CreditEventType;
 import edu.campus.taskplatform.task.TaskRepository;
 
 import org.springframework.data.domain.Sort;
@@ -25,13 +28,16 @@ public class ComplaintService {
 	private final CurrentUserService currentUserService;
 	private final TaskRepository taskRepository;
 	private final AppUserRepository userRepository;
+	private final CreditEventPublisher creditEvents;
 
 	public ComplaintService(ComplaintRepository repository, CurrentUserService currentUserService,
-			TaskRepository taskRepository, AppUserRepository userRepository) {
+			TaskRepository taskRepository, AppUserRepository userRepository,
+			CreditEventPublisher creditEvents) {
 		this.repository = repository;
 		this.currentUserService = currentUserService;
 		this.taskRepository = taskRepository;
 		this.userRepository = userRepository;
+		this.creditEvents = creditEvents;
 	}
 
 	@Transactional
@@ -85,15 +91,44 @@ public class ComplaintService {
 		if (complaint.getStatus() != ComplaintStatus.PENDING) {
 			throw new TaskException(ErrorCode.DUPLICATE_ACTION, "投诉已处理，请刷新列表");
 		}
-		if (request.actions().stream().anyMatch(action -> !action.supportsRecordOnly())
-				|| request.creditAdjustment() != null || request.financialAdjustment() != null) {
-			throw new TaskException(ErrorCode.VALIDATION_ERROR, "当前仅支持投诉处理留痕，处罚功能暂未开放");
+		if (request.actions().stream().anyMatch(action -> !action.isSupported())
+				|| request.financialAdjustment() != null) {
+			throw new TaskException(ErrorCode.VALIDATION_ERROR,
+					"当前仅支持处理留痕与信用扣分，账务调整、功能限制和冻结账号暂未开放");
 		}
 		if (new HashSet<>(request.actions()).size() != request.actions().size()) {
 			throw new TaskException(ErrorCode.VALIDATION_ERROR, "处理方式不能重复");
 		}
-		complaint.process(admin.userId(), request.actions(), request.decisionNote().trim());
+		boolean deductCredit = request.actions().stream()
+				.anyMatch(ComplaintAction::supportsCreditAdjustment);
+		Integer creditAdjustment = request.creditAdjustment();
+		if (deductCredit) {
+			if (creditAdjustment == null || !Set.of(-2, -5, -10).contains(creditAdjustment)) {
+				throw new TaskException(ErrorCode.VALIDATION_ERROR,
+						"投诉扣分档位必须为 -2、-5 或 -10");
+			}
+			if (complaint.getTargetUserId() == null) {
+				throw new TaskException(ErrorCode.VALIDATION_ERROR,
+						"未指定被投诉用户的举报不能扣信用分");
+			}
+		}
+		else if (creditAdjustment != null) {
+			throw new TaskException(ErrorCode.VALIDATION_ERROR,
+					"未选择信用扣分处理方式时 creditAdjustment 必须为空");
+		}
+		String note = request.decisionNote().trim();
+		complaint.process(admin.userId(), request.actions(),
+				deductCredit ? creditAdjustment : null, note);
+		if (deductCredit) {
+			creditEvents.publish(complaint.getTargetUserId(), CreditEventType.COMPLAINT_UPHELD,
+					complaint.getComplaintId().toString(), creditAdjustment,
+					truncate("投诉成立（" + complaint.getCategory() + "）：" + note, 500));
+		}
 		return ComplaintDto.from(complaint);
+	}
+
+	private static String truncate(String value, int maxLength) {
+		return value.length() <= maxLength ? value : value.substring(0, maxLength);
 	}
 
 	private Long parseUserId(String userId) {

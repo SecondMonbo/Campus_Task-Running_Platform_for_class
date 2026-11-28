@@ -12,6 +12,7 @@ public record ComplaintDto(
 		String description,
 		ComplaintStatus status,
 		List<ComplaintAction> actions,
+		Integer creditAdjustment,
 		String decisionNote,
 		String handledBy,
 		Instant handledAt,
@@ -21,7 +22,7 @@ public record ComplaintDto(
 		return new ComplaintDto(complaint.getComplaintId().toString(), complaint.getReporterId().toString(),
 				complaint.getTargetUserId() == null ? null : complaint.getTargetUserId().toString(),
 				complaint.getTaskId(), complaint.getCategory(), complaint.getDescription(), complaint.getStatus(),
-				complaint.getActions(), complaint.getDecisionNote(),
+				complaint.getActions(), complaint.getCreditAdjustment(), complaint.getDecisionNote(),
 				complaint.getHandledBy() == null ? null : complaint.getHandledBy().toString(),
 				complaint.getHandledAt(), complaint.getCreatedAt());
 	}

@@ -1,264 +1,401 @@
 package edu.campus.taskplatform.credit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import edu.campus.taskplatform.accounting.AccountingService;
 import edu.campus.taskplatform.auth.AppUser;
 import edu.campus.taskplatform.auth.AppUserRepository;
+import edu.campus.taskplatform.auth.AuthService;
 import edu.campus.taskplatform.auth.CurrentUser;
+import edu.campus.taskplatform.auth.RegisterRequest;
 import edu.campus.taskplatform.auth.SessionCurrentUserService;
+import edu.campus.taskplatform.common.ErrorCode;
+import edu.campus.taskplatform.common.TaskException;
+import edu.campus.taskplatform.complaint.Complaint;
+import edu.campus.taskplatform.complaint.ComplaintAction;
+import edu.campus.taskplatform.complaint.ComplaintRepository;
+import edu.campus.taskplatform.complaint.ComplaintService;
+import edu.campus.taskplatform.complaint.ComplaintStatus;
+import edu.campus.taskplatform.complaint.dto.ComplaintActionRequest;
+import edu.campus.taskplatform.credit.dto.CreditSummaryDto;
+import edu.campus.taskplatform.task.PublicationReviewDecision;
+import edu.campus.taskplatform.task.PublicationReviewStatus;
 import edu.campus.taskplatform.task.Task;
+import edu.campus.taskplatform.task.TaskPublicationReviewService;
 import edu.campus.taskplatform.task.TaskRepository;
+import edu.campus.taskplatform.task.TaskReviewRepository;
+import edu.campus.taskplatform.task.TaskService;
 import edu.campus.taskplatform.task.TaskStatus;
+import edu.campus.taskplatform.task.dto.CreateReviewRequest;
+import edu.campus.taskplatform.task.dto.PublicationReviewDecisionRequest;
+import edu.campus.taskplatform.task.dto.TaskCreateRequest;
+import edu.campus.taskplatform.task.dto.TaskView;
+import jakarta.servlet.http.HttpServletRequest;
 
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockHttpSession;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 /**
- * 信用分集成测试：初始化 80 分、评价/按时/超时事件、30 天低星规则、幂等、上下限截断，
- * 以及本人查询与他人主页的可见性边界。
+ * 信用分、低分限制、发布复核与 outbox 的集成测试。
+ *
+ * <p>显式开启事件即时消费，验证业务事务提交后信用分、记录、限制状态和发布复核的联动；
+ * 同时覆盖重复事件不污染外层事务、低星窗口串行化等并发/幂等场景。</p>
  */
 @SpringBootTest
-@AutoConfigureMockMvc
 @ActiveProfiles("test")
-@TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
-@Transactional
+@TestPropertySource(properties = {
+        "spring.jpa.hibernate.ddl-auto=create-drop",
+        "credit.events.auto-process=true",
+        "credit.events.retry-enabled=false"
+})
 class CreditScoreIntegrationTest {
 
-    @Autowired MockMvc mvc;
+    @Autowired AuthService authService;
     @Autowired CreditScoreService creditScoreService;
-    @Autowired CreditScoreRecordRepository recordRepository;
+    @Autowired CreditEventPublisher creditEvents;
+    @Autowired CreditScoreRepository creditScores;
+    @Autowired CreditScoreRecordRepository creditRecords;
+    @Autowired CreditEventRepository creditEventRepository;
     @Autowired AppUserRepository users;
+    @Autowired TaskService taskService;
     @Autowired TaskRepository tasks;
+    @Autowired TaskReviewRepository reviews;
+    @Autowired AccountingService accounting;
+    @Autowired TaskPublicationReviewService publicationReviewService;
+    @Autowired ComplaintService complaintService;
+    @Autowired ComplaintRepository complaints;
+    @Autowired PlatformTransactionManager transactionManager;
 
-    Long publisherId;
-    Long runnerId;
-
-    @BeforeEach
-    void setUp() {
-        String suffix = UUID.randomUUID().toString().substring(0, 8);
-        publisherId = users.saveAndFlush(new AppUser("cpub-" + suffix, "unused-test-hash",
-                "发布者", null, Instant.now())).getUserId();
-        runnerId = users.saveAndFlush(new AppUser("crun-" + suffix, "unused-test-hash",
-                "跑腿员", null, Instant.now())).getUserId();
+    @AfterEach
+    void clearRequestContext() {
+        RequestContextHolder.resetRequestAttributes();
     }
 
     @Test
-    void newUserStartsWith80AndInitializationRecord() {
-        assertEquals(80, creditScoreService.scoreOf(runnerId));
+    void registrationInitializesCreditAt80WithBaselineRecord() {
+        String username = "credit-init-" + UUID.randomUUID();
+        var registered = authService.register(new RegisterRequest(username, "password123", "初始化用户", null));
+        long userId = Long.parseLong(registered.userId());
 
-        List<CreditScoreRecord> records = recordRepository
-                .findByUserId(runnerId, PageRequest.of(0, 10)).getContent();
-        assertEquals(1, records.size());
-        CreditScoreRecord baseline = records.get(0);
-        assertEquals(CreditEventType.INITIALIZATION, baseline.getEventType());
-        assertNull(baseline.getScoreBefore());
-        assertEquals(0, baseline.getRequestedDelta());
-        assertEquals(0, baseline.getActualDelta());
-        assertEquals(80, baseline.getScoreAfter());
+        CreditScore account = creditScores.findById(userId).orElseThrow();
+        assertEquals(80, account.getScore());
+        assertFalse(account.isRestricted());
+        assertTrue(creditRecords.findByUserId(userId, PageRequest.of(0, 10)).getContent().stream()
+                .anyMatch(record -> record.getEventType() == CreditEventType.INITIALIZATION
+                        && record.getScoreBefore() == null && record.getScoreAfter() == 80));
     }
 
     @Test
-    void reviewEventsFollowRulesAndAreIdempotent() {
-        creditScoreService.applyReview(publisherId, runnerId, "review-5star", 5, true, "任务A");
-        assertEquals(82, creditScoreService.scoreOf(runnerId));
+    void reviewsApplyFiveStarNeutralAndThirtyDayLowStarDeduplication() {
+        AppUser publisher = user();
+        AppUser runner = user();
 
-        // 同一评价重复投递：不重复加分。
-        creditScoreService.applyReview(publisherId, runnerId, "review-5star", 5, true, "任务A");
-        assertEquals(82, creditScoreService.scoreOf(runnerId));
+        taskService.createReview(current(publisher), completedTask(publisher, runner).getTaskId(), review(5));
+        assertEquals(82, scoreOf(runner));
 
-        // 3–4 星：只记零分值记录，不加减分。
-        creditScoreService.applyReview(publisherId, runnerId, "review-4star", 4, true, "任务B");
-        assertEquals(82, creditScoreService.scoreOf(runnerId));
-        CreditScoreRecord neutral = findRecord("review-4star");
-        assertEquals(0, neutral.getRequestedDelta());
-        assertEquals(0, neutral.getActualDelta());
+        taskService.createReview(current(publisher), completedTask(publisher, runner).getTaskId(), review(3));
+        assertEquals(82, scoreOf(runner));
 
-        // 1–2 星：30 天内首次扣 -3。
-        creditScoreService.applyReview(publisherId, runnerId, "review-2star-first", 2, true, "任务C");
-        assertEquals(79, creditScoreService.scoreOf(runnerId));
-        CreditScoreRecord firstLow = findRecord("review-2star-first");
-        assertEquals(-3, firstLow.getActualDelta());
+        taskService.createReview(current(publisher), completedTask(publisher, runner).getTaskId(), review(1));
+        assertEquals(79, scoreOf(runner));
 
-        // 同一发布者对同一跑腿员 30 天内再次低星：仅留痕，不再扣分。
-        creditScoreService.applyReview(publisherId, runnerId, "review-1star-later", 1, false, "任务D");
-        assertEquals(79, creditScoreService.scoreOf(runnerId));
-        assertEquals(0, findRecord("review-1star-later").getActualDelta());
+        taskService.createReview(current(publisher), completedTask(publisher, runner).getTaskId(), review(2));
+        assertEquals(79, scoreOf(runner));
     }
 
     @Test
-    void completionEventsAddOneOnTimeAndSubtractFiveWhenOverdueBeyondGrace() {
-        Task onTime = completedTask(Instant.now().plusSeconds(3600), Instant.now());
-        creditScoreService.applyCompletionOutcome(onTime);
-        assertEquals(81, creditScoreService.scoreOf(runnerId));
+    void completionAppliesOnTimeGraceAndOvertimeRules() {
+        AppUser publisher = user();
+        AppUser runner = user();
+        accounting.openAccount(publisher.getUserId(), 100);
+        accounting.openAccount(runner.getUserId(), 0);
 
-        // 截止后 24 小时内送达：不加不扣。
-        Task withinGrace = completedTask(Instant.now().minusSeconds(30 * 3600),
-                Instant.now().minusSeconds(29 * 3600));
-        creditScoreService.applyCompletionOutcome(withinGrace);
-        assertEquals(81, creditScoreService.scoreOf(runnerId));
-        assertNull(findRecordOrNull(withinGrace.getTaskId()));
+        Instant now = Instant.now();
+        Task onTime = saveTask(publisher, runner, TaskStatus.WAITING_FOR_ACCEPTANCE,
+                now.plus(Duration.ofHours(1)), now, 20);
+        accounting.freeze(publisher.getUserId(), onTime.getTaskId(), 20);
+        taskService.completeTask(current(publisher), onTime.getTaskId());
+        assertEquals(81, scoreOf(runner));
 
-        // 超时 24 小时以上送达：-5，每任务一次。
-        Task overtime = completedTask(Instant.now().minusSeconds(30 * 3600),
-                Instant.now().minusSeconds(5 * 3600));
-        creditScoreService.applyCompletionOutcome(overtime);
-        assertEquals(76, creditScoreService.scoreOf(runnerId));
-        creditScoreService.applyCompletionOutcome(overtime);
-        assertEquals(76, creditScoreService.scoreOf(runnerId));
-        assertEquals(-5, findRecord(overtime.getTaskId()).getActualDelta());
+        Instant lateDeadline = now.minus(Duration.ofDays(2));
+        Task late = saveTask(publisher, runner, TaskStatus.WAITING_FOR_ACCEPTANCE,
+                lateDeadline, lateDeadline.plus(Duration.ofHours(25)), 20);
+        accounting.freeze(publisher.getUserId(), late.getTaskId(), 20);
+        taskService.completeTask(current(publisher), late.getTaskId());
+        assertEquals(76, scoreOf(runner));
     }
 
     @Test
-    void scoreIsClampedToRangeAndZeroDeltaIsStillRecorded() {
-        creditScoreService.applyEvent(runnerId, CreditEventType.ON_TIME_COMPLETION, "clamp-up", 50,
-                "上限截断");
-        assertEquals(100, creditScoreService.scoreOf(runnerId));
-        CreditScoreRecord up = findRecord("clamp-up");
-        assertEquals(50, up.getRequestedDelta());
-        assertEquals(20, up.getActualDelta());
+    void lowScoreRestrictionPublishesForReviewAndLiftsAt75() {
+        AppUser restricted = user();
+        AppUser other = user();
+        AppUser admin = user();
+        accounting.openAccount(restricted.getUserId(), 100);
 
-        creditScoreService.applyEvent(runnerId, CreditEventType.OVERTIME_DELIVERY, "clamp-down", -100,
-                "下限截断");
-        assertEquals(0, creditScoreService.scoreOf(runnerId));
-        CreditScoreRecord down = findRecord("clamp-down");
-        assertEquals(-100, down.getActualDelta());
+        creditScoreService.adjustByAdmin(restricted.getUserId(), -21, "复核扣分", admin.getUserId());
+        assertEquals(59, scoreOf(restricted));
+        assertTrue(reload(restricted).isRestricted());
 
-        creditScoreService.applyEvent(runnerId, CreditEventType.REVIEW_NEUTRAL, "zero-event", 0,
-                "零分值留痕");
-        assertEquals(0, creditScoreService.scoreOf(runnerId));
-        assertEquals(0, findRecord("zero-event").getActualDelta());
+        // 60 分不触发新限制，但已受限用户要继续保持到 75 分。
+        creditScoreService.adjustByAdmin(restricted.getUserId(), 1, "复核调整", admin.getUserId());
+        assertEquals(60, scoreOf(restricted));
+        assertTrue(reload(restricted).isRestricted());
+        // 60 分档位是预警，但持久化限制仍生效，本人页文案不能误报“可正常接单”。
+        var restrictedView = creditScoreService.myCredit(restricted.getUserId(), 0, 10);
+        assertEquals(CreditTier.WARNING.name(), restrictedView.tier());
+        assertTrue(restrictedView.permissionHint().contains("受限"));
+
+        TaskView pending = taskService.createTask(current(restricted), taskRequest(10));
+        assertEquals(PublicationReviewStatus.PENDING_REVIEW, pending.getPublicationReviewStatus());
+        assertTrue(taskService.listTasks(null, null, 0, 10).getItems().stream()
+                .noneMatch(task -> task.getTaskId().equals(pending.getTaskId())));
+        assertThrows(TaskException.class,
+                () -> taskService.getTask(current(other), pending.getTaskId()));
+
+        Task normal = saveTask(other, restricted, TaskStatus.WAITING_FOR_TAKER,
+                Instant.now().plus(Duration.ofHours(1)), null, 10);
+        TaskException acceptError = assertThrows(TaskException.class,
+                () -> taskService.acceptTask(current(restricted), normal.getTaskId()));
+        assertEquals(ErrorCode.FORBIDDEN, acceptError.getErrorCode());
+
+        asUser(admin.getUserId(), "ADMIN");
+        TaskView approved = publicationReviewService.decide(pending.getTaskId(),
+                new PublicationReviewDecisionRequest(PublicationReviewDecision.APPROVE, "资料齐全"));
+        assertEquals(PublicationReviewStatus.APPROVED, approved.getPublicationReviewStatus());
+        assertEquals(PublicationReviewStatus.APPROVED,
+                taskService.getTask(current(other), pending.getTaskId()).getPublicationReviewStatus());
+
+        creditScoreService.adjustByAdmin(restricted.getUserId(), 15, "恢复", admin.getUserId());
+        assertEquals(75, scoreOf(restricted));
+        assertFalse(reload(restricted).isRestricted());
+        assertTrue(creditScoreService.myCredit(restricted.getUserId(), 0, 10)
+                .permissionHint().contains("正常"));
+        TaskView normalPublish = taskService.createTask(current(restricted), taskRequest(10));
+        assertEquals(PublicationReviewStatus.NOT_REQUIRED, normalPublish.getPublicationReviewStatus());
     }
 
     @Test
-    void myCreditEndpointReturnsScoreTierAndRecords() throws Exception {
-        mvc.perform(get("/api/v1/users/me/credit").session(session(runnerId)).param("size", "10"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value("OK"))
-                .andExpect(jsonPath("$.data.score").value(80))
-                .andExpect(jsonPath("$.data.tier").value("GOOD"))
-                .andExpect(jsonPath("$.data.tierLabel").value("良好"))
-                .andExpect(jsonPath("$.data.permissionHint").isString())
-                .andExpect(jsonPath("$.data.recoveryHint").isString())
-                .andExpect(jsonPath("$.data.records.total").value(1))
-                .andExpect(jsonPath("$.data.records.items[0].eventType").value("INITIALIZATION"))
-                .andExpect(jsonPath("$.data.records.items[0].scoreAfter").value(80));
+    void rejectedPublicationCancelsTaskAndRefundsReward() {
+        AppUser restricted = user();
+        AppUser admin = user();
+        accounting.openAccount(restricted.getUserId(), 100);
+        creditScoreService.adjustByAdmin(restricted.getUserId(), -30, "复核扣分", admin.getUserId());
+
+        TaskView pending = taskService.createTask(current(restricted), taskRequest(10));
+        assertEquals(90, accounting.getAvailableBalance(restricted.getUserId()));
+        assertEquals(10, accounting.getFrozenBalance(restricted.getUserId()));
+
+        asUser(admin.getUserId(), "ADMIN");
+        TaskView rejected = publicationReviewService.decide(pending.getTaskId(),
+                new PublicationReviewDecisionRequest(PublicationReviewDecision.REJECT, "信息不完整"));
+
+        assertEquals(PublicationReviewStatus.REJECTED, rejected.getPublicationReviewStatus());
+        assertEquals(TaskStatus.CANCELLED, rejected.getStatus());
+        assertEquals(100, accounting.getAvailableBalance(restricted.getUserId()));
+        assertEquals(0, accounting.getFrozenBalance(restricted.getUserId()));
     }
 
     @Test
-    void publicProfileOnlyExposesTierAndCompletedCount() throws Exception {
-        Task finished = completedTask(Instant.now().plusSeconds(3600), Instant.now());
-        finished.setStatus(TaskStatus.COMPLETED);
-        tasks.saveAndFlush(finished);
+    void complaintCreditAdjustmentIsValidatedAndApplied() {
+        AppUser reporter = user();
+        AppUser target = user();
+        AppUser admin = user();
+        Complaint complaint = complaints.saveAndFlush(
+                new Complaint(reporter.getUserId(), target.getUserId(), null, "违约", "未按约定送达"));
+        asUser(admin.getUserId(), "ADMIN");
 
-        mvc.perform(get("/api/v1/users/{userId}/profile", runnerId).session(session(publisherId)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.userId").value(runnerId.toString()))
-                .andExpect(jsonPath("$.data.displayName").value("跑腿员"))
-                .andExpect(jsonPath("$.data.creditTier").value("GOOD"))
-                .andExpect(jsonPath("$.data.creditTierLabel").value("良好"))
-                .andExpect(jsonPath("$.data.completedTasks").value(1))
-                // 他人主页不得出现精确分值与变更明细。
-                .andExpect(jsonPath("$.data.score").doesNotExist())
-                .andExpect(jsonPath("$.data.records").doesNotExist());
+        complaintService.process(complaint.getComplaintId(), new ComplaintActionRequest(
+                List.of(ComplaintAction.CREDIT_ADJUSTMENT), -5, null, "一般违约，扣 5 分"));
+
+        Complaint processed = complaints.findById(complaint.getComplaintId()).orElseThrow();
+        assertEquals(ComplaintStatus.PROCESSED, processed.getStatus());
+        assertEquals(-5, processed.getCreditAdjustment());
+        assertEquals(75, scoreOf(target));
     }
 
     @Test
-    void creditEndpointsValidateAuthPagingAndUnknownUser() throws Exception {
-        mvc.perform(get("/api/v1/users/me/credit")).andExpect(status().isUnauthorized());
-        mvc.perform(get("/api/v1/users/{userId}/profile", publisherId))
-                .andExpect(status().isUnauthorized());
+    void complaintCreditAdjustmentRequiresTargetAndAllowedTier() {
+        AppUser reporter = user();
+        AppUser admin = user();
+        Complaint noTarget = complaints.saveAndFlush(
+                new Complaint(reporter.getUserId(), null, null, "举报", "任务内容违规"));
+        asUser(admin.getUserId(), "ADMIN");
 
-        mvc.perform(get("/api/v1/users/me/credit").session(session(runnerId)).param("size", "30"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
-        mvc.perform(get("/api/v1/users/me/credit").session(session(runnerId)).param("page", "-1"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        TaskException missingTarget = assertThrows(TaskException.class,
+                () -> complaintService.process(noTarget.getComplaintId(), new ComplaintActionRequest(
+                        List.of(ComplaintAction.CREDIT_ADJUSTMENT), -2, null, "轻微违规")));
+        assertEquals(ErrorCode.VALIDATION_ERROR, missingTarget.getErrorCode());
 
-        mvc.perform(get("/api/v1/users/{userId}/profile", 999_999L).session(session(runnerId)))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
-        mvc.perform(get("/api/v1/users/not-a-number/profile").session(session(runnerId)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        AppUser target = user();
+        Complaint invalidTier = complaints.saveAndFlush(
+                new Complaint(reporter.getUserId(), target.getUserId(), null, "违约", "违规"));
+        TaskException badTier = assertThrows(TaskException.class,
+                () -> complaintService.process(invalidTier.getComplaintId(), new ComplaintActionRequest(
+                        List.of(ComplaintAction.CREDIT_ADJUSTMENT), -4, null, "档位错误")));
+        assertEquals(ErrorCode.VALIDATION_ERROR, badTier.getErrorCode());
     }
 
     @Test
-    void taskReviewEndpointAppliesFiveStarBonus() throws Exception {
-        Task finished = completedTask(Instant.now().plusSeconds(3600), Instant.now());
-        finished.setStatus(TaskStatus.COMPLETED);
-        tasks.saveAndFlush(finished);
+    void warningTierPublisherTasksAreOrderedAfterNormalTasks() {
+        AppUser warning = user();
+        AppUser normal = user();
+        AppUser admin = user();
+        accounting.openAccount(warning.getUserId(), 100);
+        accounting.openAccount(normal.getUserId(), 100);
+        creditScoreService.adjustByAdmin(warning.getUserId(), -10, "进入预警档", admin.getUserId());
 
-        mvc.perform(post("/api/v1/tasks/{taskId}/reviews", finished.getTaskId())
-                        .session(session(publisherId)).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"score\":5,\"content\":\"非常准时\"}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.score").value(5));
+        String keyword = "sort-" + UUID.randomUUID();
+        TaskView normalTask = taskService.createTask(current(normal), taskRequest(10, keyword + "-normal"));
+        TaskView warningTask = taskService.createTask(current(warning), taskRequest(10, keyword + "-warning"));
 
-        mvc.perform(get("/api/v1/users/me/credit").session(session(runnerId)).param("size", "10"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.score").value(82))
-                .andExpect(jsonPath("$.data.records.total").value(2));
+        List<String> orderedIds = taskService.listTasks(TaskStatus.WAITING_FOR_TAKER, keyword, 0, 10)
+                .getItems().stream().map(TaskView::getTaskId).toList();
+        assertEquals(List.of(normalTask.getTaskId(), warningTask.getTaskId()), orderedIds);
     }
 
-    // ---------------------------------------------------------------
-    // 辅助
-    // ---------------------------------------------------------------
+    @Test
+    void tenConsecutiveCompletionsRestoreTo75AndLiftRestriction() {
+        AppUser user = user();
+        AppUser admin = user();
+        creditScoreService.adjustByAdmin(user.getUserId(), -30, "复核扣分", admin.getUserId());
+        assertEquals(50, scoreOf(user));
+        assertTrue(reload(user).isRestricted());
 
-    private Task completedTask(Instant deadline, Instant deliveredAt) {
-        Task task = new Task(UUID.randomUUID().toString(), publisherId, "信用分测试任务", "说明", 20,
-                deadline, "取件点", "送达点", Instant.now().minusSeconds(3600));
-        task.setRunnerId(runnerId);
-        task.setStatus(TaskStatus.WAITING_FOR_ACCEPTANCE);
+        for (int i = 0; i < 10; i++) {
+            creditEvents.publish(user.getUserId(), CreditEventType.COMPLETION_IN_GRACE,
+                    "recovery-task-" + user.getUserId() + "-" + i, 0, "连续履约测试");
+        }
+
+        CreditScore recovered = reload(user);
+        assertEquals(75, recovered.getScore());
+        assertFalse(recovered.isRestricted());
+        assertEquals(0, recovered.getConsecutiveCompletedTasks());
+        CreditSummaryDto summary = creditScoreService.summary(user.getUserId());
+        assertEquals(CreditTier.GOOD, summary.tier());
+        assertTrue(summary.canAcceptTasks());
+    }
+
+    @Test
+    void publicProfileHidesExactScoreAndShowsCompletedCount() {
+        AppUser runner = user();
+        AppUser publisher = user();
+        saveTask(publisher, runner, TaskStatus.COMPLETED,
+                Instant.now().plus(Duration.ofHours(1)), Instant.now(), 10);
+
+        var profile = creditScoreService.publicProfile(runner.getUserId());
+        assertEquals(runner.getUserId().toString(), profile.userId());
+        assertEquals("GOOD", profile.creditTier());
+        assertEquals(1, profile.completedTasks());
+    }
+
+    /**
+     * 回归：同一事件在同一个外层业务事务中重复发布时，不能因唯一键冲突把事务标记为
+     * rollback-only；外层业务写入与 outbox 事件都要正常提交，分值只记一次。
+     */
+    @Test
+    void duplicatePublishKeepsOuterTransactionCommittable() {
+        AppUser runner = user();
+        creditScoreService.ensureAccount(runner.getUserId());
+        String source = "duplicate-publish-" + UUID.randomUUID();
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+
+        transaction.executeWithoutResult(status -> {
+            creditEvents.publish(runner.getUserId(), CreditEventType.ON_TIME_COMPLETION,
+                    source, 1, "重复发布回归");
+            creditEvents.publish(runner.getUserId(), CreditEventType.ON_TIME_COMPLETION,
+                    source, 1, "重复发布回归");
+            AppUser marker = users.findById(runner.getUserId()).orElseThrow();
+            marker.updateProfile("重复发布后仍提交", null);
+            users.save(marker);
+        });
+
+        assertEquals("重复发布后仍提交", users.findById(runner.getUserId()).orElseThrow().getDisplayName());
+        assertEquals(1, creditEventRepository.findAll().stream()
+                .filter(event -> source.equals(event.getSourceId())).count());
+        assertEquals(81, scoreOf(runner));
+
+        // 再次消费也不会重复记分。
+        creditEvents.publish(runner.getUserId(), CreditEventType.ON_TIME_COMPLETION,
+                source, 1, "重复发布回归");
+        assertEquals(81, scoreOf(runner));
+    }
+
+    private AppUser user() {
+        String username = "credit-" + UUID.randomUUID();
+        return users.saveAndFlush(new AppUser(username, "unused-test-hash", "信用分测试用户", null, Instant.now()));
+    }
+
+    private CreditScore reload(AppUser user) {
+        return creditScores.findById(user.getUserId()).orElseThrow();
+    }
+
+    private int scoreOf(AppUser user) {
+        return creditScoreService.scoreOf(user.getUserId());
+    }
+
+    private static CurrentUser current(AppUser user) {
+        return new CurrentUser(user.getUserId(), "USER");
+    }
+
+    private Task completedTask(AppUser publisher, AppUser runner) {
+        return saveTask(publisher, runner, TaskStatus.COMPLETED,
+                Instant.now().plus(Duration.ofHours(1)), Instant.now(), 10);
+    }
+
+    private Task saveTask(AppUser publisher, AppUser runner, TaskStatus status, Instant deadline,
+            Instant deliveredAt, long reward) {
+        Task task = new Task(UUID.randomUUID().toString(), publisher.getUserId(), "信用分任务",
+                "测试说明", reward, deadline, "取件点", "送达点", Instant.now());
+        task.setStatus(status);
+        task.setRunnerId(runner.getUserId());
         task.setDeliveredAt(deliveredAt);
         return tasks.saveAndFlush(task);
     }
 
-    private CreditScoreRecord findRecord(String sourceId) {
-        CreditScoreRecord record = findRecordOrNull(sourceId);
-        assertNotNull(record, "缺少 sourceId=" + sourceId + " 的信用分记录");
-        return record;
+    private static CreateReviewRequest review(int score) {
+        CreateReviewRequest request = new CreateReviewRequest();
+        request.setScore(score);
+        request.setContent("测试评价");
+        return request;
     }
 
-    private CreditScoreRecord findRecordOrNull(String sourceId) {
-        return recordRepository.findAll().stream()
-                .filter(item -> sourceId.equals(item.getSourceId()))
-                .findFirst().orElse(null);
+    private static TaskCreateRequest taskRequest(int reward) {
+        return taskRequest(reward, "信用分发布任务");
     }
 
-    private MockHttpSession session(Long userId) {
-        var httpSession = new MockHttpSession();
-        httpSession.setAttribute(SessionCurrentUserService.SESSION_ATTRIBUTE, new CurrentUser(userId, "USER"));
-        var context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated("test-user-" + userId, null,
-                List.of(new SimpleGrantedAuthority("ROLE_USER"))));
-        httpSession.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
-        return httpSession;
+    private static TaskCreateRequest taskRequest(int reward, String title) {
+        TaskCreateRequest request = new TaskCreateRequest();
+        request.setTitle(title);
+        request.setDescription("测试发布复核");
+        request.setReward(reward);
+        request.setDeadline(Instant.now().plus(Duration.ofHours(2)));
+        request.setPickupLocation("取件点");
+        request.setDeliveryLocation("送达点");
+        return request;
+    }
+
+    private static void asUser(Long userId, String role) {
+        HttpServletRequest request = new MockHttpServletRequest();
+        request.getSession().setAttribute(SessionCurrentUserService.SESSION_ATTRIBUTE,
+                new CurrentUser(userId, role));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
     }
 }

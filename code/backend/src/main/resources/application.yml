@@ -33,3 +33,10 @@ management:
   endpoint:
     health:
       show-details: never
+
+credit:
+  events:
+    # 业务事务提交后立即消费一次信用分事件；失败事件由定时任务保留重试。
+    auto-process: true
+    retry-enabled: true
+    retry-delay-ms: 10000

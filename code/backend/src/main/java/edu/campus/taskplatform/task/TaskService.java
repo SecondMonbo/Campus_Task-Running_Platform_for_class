@@ -4,16 +4,22 @@ import edu.campus.taskplatform.accounting.AccountingService;
 import edu.campus.taskplatform.accounting.InsufficientBalanceException;
 import edu.campus.taskplatform.auth.CurrentUser;
 import edu.campus.taskplatform.common.ErrorCode;
+import edu.campus.taskplatform.credit.CreditEventPublisher;
+import edu.campus.taskplatform.credit.CreditEventType;
+import edu.campus.taskplatform.credit.CreditScore;
+import edu.campus.taskplatform.credit.CreditScoreService;
 import edu.campus.taskplatform.notification.NotificationService;
 import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
-import edu.campus.taskplatform.credit.CreditScoreService;
 import edu.campus.taskplatform.task.dto.CreateReviewRequest;
 import edu.campus.taskplatform.task.dto.TaskCreateRequest;
 import edu.campus.taskplatform.task.dto.TaskUpdateRequest;
 import edu.campus.taskplatform.task.dto.TaskView;
 import edu.campus.taskplatform.task.dto.WithdrawalRequest;
+import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -25,6 +31,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,19 +61,22 @@ public class TaskService {
     private final AccountingService accounting;
     private final NotificationService notificationService;
     private final CreditScoreService creditScoreService;
+    private final CreditEventPublisher creditEvents;
 
     public TaskService(TaskRepository taskRepository,
                        TaskOperationLogRepository operationLogRepository,
                        TaskReviewRepository reviewRepository,
                        AccountingService accounting,
                        NotificationService notificationService,
-                       CreditScoreService creditScoreService) {
+                       CreditScoreService creditScoreService,
+                       CreditEventPublisher creditEvents) {
         this.taskRepository = taskRepository;
         this.operationLogRepository = operationLogRepository;
         this.reviewRepository = reviewRepository;
         this.accounting = accounting;
         this.notificationService = notificationService;
         this.creditScoreService = creditScoreService;
+        this.creditEvents = creditEvents;
     }
 
     // ---------------------------------------------------------------
@@ -86,8 +96,14 @@ public class TaskService {
         Task task = new Task(taskId, publisher.userId(), req.getTitle(), req.getDescription(),
                 req.getReward(), req.getDeadline(), req.getPickupLocation(),
                 req.getDeliveryLocation(), now);
+        boolean restricted = creditScoreService.isRestricted(publisher.userId());
+        task.setPublicationReviewStatus(restricted
+                ? PublicationReviewStatus.PENDING_REVIEW
+                : PublicationReviewStatus.NOT_REQUIRED);
         taskRepository.save(task);
-        writeLog(taskId, publisher.userId(), "PUBLISH", "发布任务，报酬=" + req.getReward() + " 已冻结");
+        writeLog(taskId, publisher.userId(), "PUBLISH", restricted
+                ? "发布任务，报酬=" + req.getReward() + " 已冻结，等待管理员发布复核"
+                : "发布任务，报酬=" + req.getReward() + " 已冻结");
         return TaskView.from(task);
     }
 
@@ -99,14 +115,25 @@ public class TaskService {
      * 浏览任务：可选按状态、标题/地点关键字筛选，分页；空列表返回空 items。
      */
     public PageResult<TaskView> listTasks(TaskStatus status, String keyword, int page, int size) {
-        Pageable pageable = pageRequest(page, size);
+        // 排序在 Specification 中完成：预警档发布者的任务排在非预警档之后。
+        Pageable pageable = PageRequest.of(page, size);
         Page<Task> result = taskRepository.findAll(browseSpec(status, keyword), pageable);
         return PageResult.of(toViews(result.getContent()), page, size, result.getTotalElements());
     }
 
     /**
-     * 任务详情。
+     * 任务详情。待发布复核的任务仅发布者与管理员可见。
      */
+    public TaskView getTask(CurrentUser viewer, String taskId) {
+        Task task = requireTask(taskId);
+        if (!task.getPublicationReviewStatus().isPubliclyVisible()
+                && !task.getPublisherId().equals(viewer.userId()) && !viewer.isAdmin()) {
+            throw new TaskException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在");
+        }
+        return TaskView.from(task);
+    }
+
+    /** 内部/测试使用的无可见性过滤查询。 */
     public TaskView getTask(String taskId) {
         return TaskView.from(requireTask(taskId));
     }
@@ -212,6 +239,13 @@ public class TaskService {
     public TaskView acceptTask(CurrentUser runner, String taskId) {
         Task task = taskRepository.findByIdForUpdate(taskId)
                 .orElseThrow(() -> new TaskException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在"));
+        if (creditScoreService.isRestricted(runner.userId())) {
+            throw new TaskException(ErrorCode.FORBIDDEN,
+                    "信用分处于受限状态，不能接取普通任务；恢复至 75 分后自动解除限制");
+        }
+        if (!task.getPublicationReviewStatus().isPubliclyVisible()) {
+            throw new TaskException(ErrorCode.TASK_STATE_CONFLICT, "任务尚未通过发布复核，暂不可接取");
+        }
         if (task.getPublisherId().equals(runner.userId())) {
             throw new TaskException(ErrorCode.FORBIDDEN, "发布者不能接取自己发布的任务");
         }
@@ -252,7 +286,7 @@ public class TaskService {
         taskRepository.save(task);
         writeLog(taskId, runner.userId(), "DELIVER", "确认送达");
         // 信用分：送达时间晚于截止 24 小时记 -5；截止后 24 小时内不加不扣（按任务 ID 幂等）。
-        creditScoreService.applyDeliveryOutcome(task);
+        publishOvertimeDeliveryEvent(task);
         safeNotify(task.getPublisherId(), "任务已送达",
                 "「" + task.getTitle() + "」已确认送达，请及时验收。", taskId);
         return TaskView.from(task);
@@ -283,8 +317,9 @@ public class TaskService {
         doSettle(taskId, publisher.userId(), runnerId, reward);
         taskRepository.save(task);
         writeLog(taskId, publisher.userId(), "COMPLETE", "确认完成，报酬=" + reward + " 结算给跑腿员");
-        // 信用分：截止前送达 +1（与评价不互抵）；超时 24 小时以上补记 -5。均按任务 ID 幂等。
-        creditScoreService.applyCompletionOutcome(task);
+        // 信用分：截止前送达 +1；截止后 24 小时内只累计连续履约；超时 24 小时以上 -5。
+        // 均按任务 ID 幂等，与送达时的超时事件共用唯一键。
+        publishCompletionCreditEvent(task, runnerId);
         safeNotify(runnerId, "任务已完成",
                 "「" + task.getTitle() + "」已完成，报酬 " + reward + " 虚拟币已结算到你的钱包。", taskId);
         return TaskView.from(task);
@@ -308,22 +343,42 @@ public class TaskService {
             throw new TaskException(ErrorCode.DUPLICATE_ACTION, "该任务已被本人评价过");
         }
         Instant now = Instant.now();
-        // 先锁定跑腿员的信用分行，把“30 天窗口判定 + 后续记分”串到同一把用户锁下：
+        // 先锁定跑腿员的信用分行，把“30 天窗口判定 + 记分”串到同一把用户锁下：
         // 并发评价在锁上排队，后提交者能看到先提交的评价，不会都判定为窗口内首次低星。
         creditScoreService.acquireAccountLock(task.getRunnerId());
+        int score = req.getScore();
         // 信用分规则：同一发布者对同一跑腿员滚动 30 天内只有第一次低星评价扣分；
         // 需在保存本次评价前统计窗口内已有的低星评价数量。
         boolean firstLowStar = reviewRepository
                 .countByReviewerIdAndRevieweeIdAndScoreLessThanEqualAndCreatedAtAfter(
                         publisher.userId(), task.getRunnerId(), 2,
                         now.minus(CreditScoreService.LOW_STAR_WINDOW)) == 0;
+        CreditEventType eventType;
+        int delta;
+        String reason;
+        if (score == 5) {
+            eventType = CreditEventType.REVIEW_5_STAR;
+            delta = 2;
+            reason = "收到 5 星评价";
+        }
+        else if (score >= 3) {
+            eventType = CreditEventType.REVIEW_NEUTRAL;
+            delta = 0;
+            reason = "收到 " + score + " 星评价";
+        }
+        else {
+            eventType = CreditEventType.REVIEW_LOW_STAR;
+            delta = firstLowStar ? -3 : 0;
+            reason = firstLowStar
+                    ? "收到 " + score + " 星评价（30 天内首次低星评价）"
+                    : "收到 " + score + " 星评价（30 天内已扣过低星评价分）";
+        }
         TaskReview review = new TaskReview(UUID.randomUUID().toString(), taskId,
-                publisher.userId(), task.getRunnerId(), req.getScore(), req.getContent(), now);
+                publisher.userId(), task.getRunnerId(), score, req.getContent(), now);
         reviewRepository.save(review);
         writeLog(taskId, publisher.userId(), "REVIEW", "提交评价");
-        // 信用分：5 星 +2；3–4 星 0；1–2 星首次 -3，其余仅留痕。以评价 ID 幂等。
-        creditScoreService.applyReview(publisher.userId(), task.getRunnerId(), review.getReviewId(),
-                req.getScore(), firstLowStar, task.getTitle());
+        // 业务事务只写 outbox；提交后消费一次，失败保留重试。以评价 ID 幂等。
+        creditEvents.publish(task.getRunnerId(), eventType, review.getReviewId(), delta, reason);
         safeNotify(task.getRunnerId(), "收到新的评价",
                 "你的任务「" + task.getTitle() + "」收到发布者评价，评分 " + req.getScore() + " 星。", taskId);
         return review;
@@ -347,6 +402,52 @@ public class TaskService {
         if (!task.getPublisherId().equals(actor.userId())) {
             throw new TaskException(ErrorCode.FORBIDDEN, "无权操作该任务");
         }
+    }
+
+    /**
+     * 任务完成时记录信用分事件：按时 +1；超过截止 24 小时 -5；中间窗口只累计连续履约。
+     * 每任务最多一条完成事件，事件按任务 ID 幂等。
+     */
+    private void publishCompletionCreditEvent(Task task, Long runnerId) {
+        Instant deliveredAt = task.getDeliveredAt();
+        CreditEventType eventType;
+        int delta;
+        String reason;
+        if (deliveredAt == null) {
+            eventType = CreditEventType.COMPLETION_IN_GRACE;
+            delta = 0;
+            reason = "任务完成（缺少送达时间，不计按时或超时）";
+        }
+        else if (!deliveredAt.isAfter(task.getDeadline())) {
+            eventType = CreditEventType.ON_TIME_COMPLETION;
+            delta = 1;
+            reason = "按时完成任务";
+        }
+        else if (isOvertime(task)) {
+            eventType = CreditEventType.OVERTIME_DELIVERY;
+            delta = -5;
+            reason = "超过截止时间 24 小时送达";
+        }
+        else {
+            eventType = CreditEventType.COMPLETION_IN_GRACE;
+            delta = 0;
+            reason = "任务完成（截止后 24 小时内送达）";
+        }
+        creditEvents.publish(runnerId, eventType, task.getTaskId(), delta, reason);
+    }
+
+    /** 送达即超时 24 小时：立即写 -5 事件；确认完成时再写一次会按 (类型, 任务 ID) 幂等忽略。 */
+    private void publishOvertimeDeliveryEvent(Task task) {
+        if (task.getRunnerId() == null || !isOvertime(task)) {
+            return;
+        }
+        creditEvents.publish(task.getRunnerId(), CreditEventType.OVERTIME_DELIVERY,
+                task.getTaskId(), -5, "超过截止时间 24 小时送达");
+    }
+
+    private static boolean isOvertime(Task task) {
+        return task.getDeliveredAt() != null
+                && task.getDeliveredAt().isAfter(task.getDeadline().plus(Duration.ofHours(24)));
     }
 
     private void writeLog(String taskId, Long actorId, String action, String detail) {
@@ -411,6 +512,9 @@ public class TaskService {
     private Specification<Task> browseSpec(TaskStatus status, String keyword) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
+            // 待复核/已驳回的任务不进入公开待接单列表。
+            predicates.add(root.get("publicationReviewStatus")
+                    .in(PublicationReviewStatus.NOT_REQUIRED, PublicationReviewStatus.APPROVED));
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
@@ -420,6 +524,21 @@ public class TaskService {
                         cb.like(cb.lower(root.get("title")), like),
                         cb.like(cb.lower(root.get("pickupLocation")), like),
                         cb.like(cb.lower(root.get("deliveryLocation")), like)));
+            }
+            if (query != null) {
+                // 预警档（60–74）发布者的任务排在非预警档之后；信用分以 credit_score 表为准。
+                Subquery<Integer> warningPublisher = query.subquery(Integer.class);
+                Root<CreditScore> credit = warningPublisher.from(CreditScore.class);
+                warningPublisher.select(cb.literal(1)).where(
+                        cb.equal(credit.get("userId"), root.get("publisherId")),
+                        cb.between(credit.get("score"), 60, 74));
+                Expression<Integer> warningTier = cb.<Integer>selectCase()
+                        .when(cb.exists(warningPublisher), 1)
+                        .otherwise(0);
+                query.orderBy(
+                        cb.asc(warningTier),
+                        cb.desc(root.get("publishedAt")),
+                        cb.desc(root.get("taskId")));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };

@@ -1,17 +1,23 @@
 package edu.campus.taskplatform.auth;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
 import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
 import edu.campus.taskplatform.common.web.Pagination;
+import edu.campus.taskplatform.credit.CreditScore;
+import edu.campus.taskplatform.credit.CreditScoreRepository;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.ArrayList;
-import java.util.Locale;
 
 /**
  * 管理员用户查询：按账号、显示名或手机号模糊匹配，数据库分页并稳定排序。
@@ -23,11 +29,14 @@ public class AdminUserQueryService {
     private static final int MAX_KEYWORD_LENGTH = 100;
 
     private final AppUserRepository repository;
+    private final CreditScoreRepository creditScoreRepository;
     private final CurrentUserService currentUserService;
 
     public AdminUserQueryService(AppUserRepository repository,
+                                 CreditScoreRepository creditScoreRepository,
                                  CurrentUserService currentUserService) {
         this.repository = repository;
+        this.creditScoreRepository = creditScoreRepository;
         this.currentUserService = currentUserService;
     }
 
@@ -52,7 +61,12 @@ public class AdminUserQueryService {
             return builder.or(predicates.toArray(Predicate[]::new));
         };
         var result = repository.findAll(specification, pageable);
-        return PageResult.of(result.getContent().stream().map(AdminUserDto::from).toList(),
+        List<Long> userIds = result.getContent().stream().map(AppUser::getUserId).toList();
+        Map<Long, CreditScore> accounts = creditScoreRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(CreditScore::getUserId, Function.identity()));
+        return PageResult.of(result.getContent().stream()
+                        .map(user -> AdminUserDto.from(user, accounts.get(user.getUserId())))
+                        .toList(),
                 page, size, result.getTotalElements());
     }
 }

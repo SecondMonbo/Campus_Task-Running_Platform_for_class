@@ -29,6 +29,12 @@ public interface TaskRepository extends JpaRepository<Task, String>, JpaSpecific
 
     Page<Task> findByRunnerIdAndStatus(Long runnerId, TaskStatus status, Pageable pageable);
 
+    Page<Task> findByPublicationReviewStatus(PublicationReviewStatus publicationReviewStatus,
+                                              Pageable pageable);
+
+    Page<Task> findByPublicationReviewStatusAndStatus(PublicationReviewStatus publicationReviewStatus,
+                                                       TaskStatus status, Pageable pageable);
+
     /** 他人主页展示：该用户作为跑腿员累计完成的任务数。 */
     long countByRunnerIdAndStatus(Long runnerId, TaskStatus status);
 }

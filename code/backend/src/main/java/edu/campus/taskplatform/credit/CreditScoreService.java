@@ -1,268 +1,341 @@
 package edu.campus.taskplatform.credit;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
 import edu.campus.taskplatform.auth.AppUser;
 import edu.campus.taskplatform.auth.AppUserRepository;
+import edu.campus.taskplatform.auth.AppUserRole;
 import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
+import edu.campus.taskplatform.common.web.Pagination;
 import edu.campus.taskplatform.credit.dto.CreditRecordDto;
+import edu.campus.taskplatform.credit.dto.CreditSummaryDto;
 import edu.campus.taskplatform.credit.dto.MyCreditDto;
 import edu.campus.taskplatform.credit.dto.PublicUserProfileDto;
 import edu.campus.taskplatform.notification.NotificationService;
 import edu.campus.taskplatform.notification.NotificationType;
-import edu.campus.taskplatform.task.Task;
 import edu.campus.taskplatform.task.TaskRepository;
 import edu.campus.taskplatform.task.TaskStatus;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
-
 /**
  * 信用分服务：初始化、变更记录、事件记分与查询。
  *
- * <p>硬性规则（API约定 §4.4）：</p>
- * <ul>
- *   <li>新用户与存量用户初始 80 分，分值限定 0–100，越界按边界截断；</li>
- *   <li>分值变化与变更记录在同一事务写入；</li>
- *   <li>以业务资源 ID（评价 ID / 任务 ID）幂等，同一事件不重复记分；</li>
- *   <li>非零变化通知用户，零分值只留痕不通知；</li>
- *   <li>他人主页只返回档位与累计完成单数，不暴露精确分值与明细。</li>
- * </ul>
+ * <p>分值唯一来源是 {@code credit_score} 表；账面变化与 {@code credit_score_record}
+ * 追加记录在同一事务提交。业务事件先写入 {@code credit_event} outbox，
+ * 提交后由 {@link CreditEventProcessor} 在独立事务中消费，信用分失败不回滚业务操作。</p>
  *
- * <p>本期接入评价、按时完成、超时送达三类任务事件；取消责任、投诉处罚、管理员调整、
- * 连续履约恢复与低分限制执行属实现边界，尚未接入。</p>
+ * <p>低分限制使用持久化状态：低于 60 分开启，恢复至 75 分及以上解除；
+ * 连续完成 10 个任务且期间无负向事件时，当前分数低于 75 则补至 75。</p>
  */
 @Service
 public class CreditScoreService {
 
-    private static final Logger log = LoggerFactory.getLogger(CreditScoreService.class);
+	private static final Logger log = LoggerFactory.getLogger(CreditScoreService.class);
 
-    /** 初始信用分。 */
-    public static final int INITIAL_SCORE = 80;
-    /** 超时送达判定：送达时间晚于截止时间 24 小时。 */
-    public static final Duration OVERTIME_GRACE = Duration.ofHours(24);
-    /** 低星扣分的滚动窗口。 */
-    public static final Duration LOW_STAR_WINDOW = Duration.ofDays(30);
+	public static final int INITIAL_SCORE = 80;
+	public static final int MIN_SCORE = 0;
+	public static final int MAX_SCORE = 100;
+	public static final int RESTRICTED_BELOW = 60;
+	public static final int RESTORE_SCORE = 75;
+	public static final int RECOVERY_STREAK = 10;
 
-    private final CreditScoreRepository scoreRepository;
-    private final CreditScoreRecordRepository recordRepository;
-    private final AppUserRepository userRepository;
-    private final TaskRepository taskRepository;
-    private final NotificationService notificationService;
+	/** 超时送达判定：送达时间晚于截止时间 24 小时。 */
+	public static final Duration OVERTIME_GRACE = Duration.ofHours(24);
+	/** 低星扣分的滚动窗口。 */
+	public static final Duration LOW_STAR_WINDOW = Duration.ofDays(30);
 
-    public CreditScoreService(CreditScoreRepository scoreRepository,
-                              CreditScoreRecordRepository recordRepository,
-                              AppUserRepository userRepository,
-                              TaskRepository taskRepository,
-                              NotificationService notificationService) {
-        this.scoreRepository = scoreRepository;
-        this.recordRepository = recordRepository;
-        this.userRepository = userRepository;
-        this.taskRepository = taskRepository;
-        this.notificationService = notificationService;
-    }
+	private static final String RESTRICTED_PERMISSION_HINT =
+			"信用受限，暂不可接取普通任务；新发布任务需管理员复核后公开。";
+	private static final String RESTRICTED_RECOVERY_HINT =
+			"连续完成 10 个任务且期间无负向信用事件后，分值恢复至 75，并解除接单限制。";
 
-    // ---------------------------------------------------------------
-    // 初始化与记分
-    // ---------------------------------------------------------------
+	private final CreditScoreRepository scoreRepository;
+	private final CreditScoreRecordRepository recordRepository;
+	private final AppUserRepository userRepository;
+	private final TaskRepository taskRepository;
+	private final NotificationService notificationService;
 
-    /**
-     * 确保用户已有信用分账户：无则创建 80 分 + 初始化基线记录（变更前为空、变动 0）。
-     * 读取时对 {@code credit_score} 行加悲观写锁，保证后续分值变更在同一用户上串行化。
-     */
-    @Transactional
-    public CreditScore ensureAccount(long userId) {
-        return scoreRepository.findByIdForUpdate(userId).orElseGet(() -> {
-            Instant now = Instant.now();
-            CreditScore account = scoreRepository.save(new CreditScore(userId, INITIAL_SCORE, now));
-            recordRepository.save(new CreditScoreRecord(UUID.randomUUID().toString(), userId,
-                    CreditEventType.INITIALIZATION, "user:" + userId, "信用分机制启用，初始化为 80 分",
-                    0, 0, null, INITIAL_SCORE, null, now));
-            return account;
-        });
-    }
+	public CreditScoreService(CreditScoreRepository scoreRepository,
+			CreditScoreRecordRepository recordRepository,
+			AppUserRepository userRepository,
+			TaskRepository taskRepository,
+			NotificationService notificationService) {
+		this.scoreRepository = scoreRepository;
+		this.recordRepository = recordRepository;
+		this.userRepository = userRepository;
+		this.taskRepository = taskRepository;
+		this.notificationService = notificationService;
+	}
 
-    /**
-     * 提前锁定某用户的信用分行，用于把“窗口判定 + 记分”整体串到同一把用户锁下：
-     * 并发评价先在该行锁上排队，后提交的事务能看到先提交的评价，不会重复判定首次低星。
-     */
-    @Transactional
-    public CreditScore acquireAccountLock(long userId) {
-        return ensureAccount(userId);
-    }
+	// ---------------------------------------------------------------
+	// 初始化与记分
+	// ---------------------------------------------------------------
 
-    /** 读取当前分值；未初始化时先补 80 分与基线记录。 */
-    @Transactional
-    public int scoreOf(long userId) {
-        return ensureAccount(userId).getScore();
-    }
+	/**
+	 * 确保用户已有信用分账户：无则创建 80 分 + 初始化基线记录（变更前为空、变动 0）。
+	 * 读取时对 {@code credit_score} 行加悲观写锁，保证后续分值变更在同一用户上串行化。
+	 */
+	@Transactional
+	public CreditScore ensureAccount(long userId) {
+		return scoreRepository.findByIdForUpdate(userId).orElseGet(() -> {
+			Instant now = Instant.now();
+			CreditScore account = scoreRepository.save(
+					new CreditScore(userId, INITIAL_SCORE, false, 0, now));
+			recordRepository.save(new CreditScoreRecord(UUID.randomUUID().toString(), userId,
+					CreditEventType.INITIALIZATION, "user:" + userId, "信用分机制启用，初始化为 80 分",
+					0, 0, null, INITIAL_SCORE, null, now));
+			return account;
+		});
+	}
 
-    /**
-     * 记一次信用事件。同一 (eventType, sourceId) 只记一次，重复调用直接返回 null（幂等）。
-     *
-     * <p>并发策略：先按事件查重，再对用户信用分行加悲观写锁；拿到锁后二次查重。
-     * 同一用户的并发事件在锁上排队，不会各自读到相同旧分再互相覆盖；同一事件的并发重试
-     * 在锁内看到对方已提交的记录后按幂等结果返回，不重复写库，也不触发外层任务事务回滚。</p>
-     *
-     * @param requestedDelta 请求变动值，实际变动按 0–100 截断后计算
-     */
-    @Transactional
-    public CreditScoreRecord applyEvent(long userId, CreditEventType type, String sourceId,
-                                       int requestedDelta, String reason) {
-        if (sourceId != null && !sourceId.isBlank()
-                && recordRepository.existsByEventTypeAndSourceId(type, sourceId)) {
-            return null;
-        }
-        // 行锁：同一用户的分值变更在此串行化。
-        CreditScore account = ensureAccount(userId);
-        if (sourceId != null && !sourceId.isBlank()) {
-            CreditScoreRecord duplicated = recordRepository
-                    .findByEventTypeAndSourceId(type, sourceId).orElse(null);
-            if (duplicated != null) {
-                return null;
-            }
-        }
-        int before = account.getScore();
-        int after = Math.max(0, Math.min(100, before + requestedDelta));
-        int actual = after - before;
-        Instant now = Instant.now();
-        account.update(after, now);
-        scoreRepository.save(account);
+	/**
+	 * 提前锁定某用户的信用分行，用于把“窗口判定 + 记分”整体串到同一把用户锁下：
+	 * 并发评价先在该行锁上排队，后提交的事务能看到先提交的评价，不会重复判定首次低星。
+	 */
+	@Transactional
+	public CreditScore acquireAccountLock(long userId) {
+		return ensureAccount(userId);
+	}
 
-        CreditScoreRecord record = recordRepository.save(new CreditScoreRecord(
-                UUID.randomUUID().toString(), userId, type, sourceId, reason,
-                requestedDelta, actual, before, after, null, now));
-        notifyChange(userId, type, actual, before, after, reason);
-        return record;
-    }
+	/** 读取当前分值；未初始化时先补 80 分与基线记录。 */
+	@Transactional
+	public int scoreOf(long userId) {
+		return ensureAccount(userId).getScore();
+	}
 
-    // ---------------------------------------------------------------
-    // 任务事件接入
-    // ---------------------------------------------------------------
+	/** 是否处于低分限制状态；未初始化时视为未受限，避免读接口产生写入。 */
+	public boolean isRestricted(long userId) {
+		return scoreRepository.findById(userId).map(CreditScore::isRestricted).orElse(false);
+	}
 
-    /**
-     * 评价事件（评价保存后调用）：5 星 +2；3–4 星 0；1–2 星仅同一发布者对同一跑腿员
-     * 30 天内第一次扣 -3，之后只记零分值记录。
-     *
-     * @param firstLowStar 本次评价是否为滚动 30 天内的首次低星评价（由调用方在保存前判定）
-     */
-    @Transactional
-    public void applyReview(long reviewerId, long revieweeId, String reviewId, int score,
-                            boolean firstLowStar, String taskTitle) {
-        if (score == 5) {
-            applyEvent(revieweeId, CreditEventType.REVIEW_5_STAR, reviewId, 2,
-                    "发布者给出 5 星评价（任务「" + taskTitle + "」）");
-            return;
-        }
-        if (score >= 3) {
-            applyEvent(revieweeId, CreditEventType.REVIEW_NEUTRAL, reviewId, 0,
-                    "发布者给出 " + score + " 星评价，不加减分（任务「" + taskTitle + "」）");
-            return;
-        }
-        if (firstLowStar) {
-            applyEvent(revieweeId, CreditEventType.REVIEW_LOW_STAR, reviewId, -3,
-                    "发布者给出 " + score + " 星评价，30 天内首次低星扣分（任务「" + taskTitle + "」）");
-        } else {
-            applyEvent(revieweeId, CreditEventType.REVIEW_LOW_STAR, reviewId, 0,
-                    "发布者给出 " + score + " 星评价，30 天内已扣分，本次仅留痕（任务「" + taskTitle + "」）");
-        }
-    }
+	/**
+	 * 消费一条 outbox 事件。由 {@link CreditEventProcessor} 在独立事务中调用。
+	 * 同一 (eventType, sourceId) 只记一次，重复调用直接返回 null。
+	 */
+	@Transactional
+	public CreditScoreRecord applyEvent(long userId, CreditEventType type, String sourceId,
+			int requestedDelta, String reason) {
+		if (sourceId != null && !sourceId.isBlank()
+				&& recordRepository.existsByEventTypeAndSourceId(type, sourceId)) {
+			return null;
+		}
+		// 行锁：同一用户的分值变更在此串行化；拿到锁后二次查重，兜住并发重复事件。
+		CreditScore account = ensureAccount(userId);
+		if (sourceId != null && !sourceId.isBlank()
+				&& recordRepository.findByEventTypeAndSourceId(type, sourceId).isPresent()) {
+			return null;
+		}
+		return applyChange(account, type, sourceId, reason, requestedDelta, null);
+	}
 
-    /**
-     * 送达事件：送达时间晚于截止时间 24 小时记 -5；截止后 24 小时内不加不扣。
-     * 每任务最多一次，以任务 ID 幂等。
-     */
-    @Transactional
-    public void applyDeliveryOutcome(Task task) {
-        if (task.getRunnerId() == null || task.getDeliveredAt() == null) {
-            return;
-        }
-        Instant deliveredAt = task.getDeliveredAt();
-        Instant overtimeThreshold = task.getDeadline().plus(OVERTIME_GRACE);
-        if (deliveredAt.isAfter(overtimeThreshold)) {
-            applyEvent(task.getRunnerId(), CreditEventType.OVERTIME_DELIVERY, task.getTaskId(), -5,
-                    "任务「" + task.getTitle() + "」超时 24 小时以上送达");
-        }
-    }
+	/**
+	 * 管理员复核调整：锁定用户行后按指定整数调整，结果截断在 0–100；历史记录只追加。
+	 * 管理员调整不经过 outbox，在同一管理事务中直接更新分数并追加记录。
+	 */
+	@Transactional
+	public CreditSummaryDto adjustByAdmin(long userId, int delta, String reason, long adminId) {
+		if (delta == 0) {
+			throw new TaskException(ErrorCode.VALIDATION_ERROR, "delta 不能为 0");
+		}
+		String trimmedReason = reason == null ? "" : reason.trim();
+		if (trimmedReason.isEmpty()) {
+			throw new TaskException(ErrorCode.VALIDATION_ERROR, "复核说明不能为空");
+		}
+		requireUser(userId);
+		CreditScore account = ensureAccount(userId);
+		applyChange(account, CreditEventType.ADMIN_REVIEW_ADJUSTMENT,
+				"admin:" + UUID.randomUUID(), truncate(trimmedReason, 500), delta, adminId);
+		return CreditSummaryDto.from(account);
+	}
 
-    /**
-     * 完成事件：截止时间前送达 +1（每任务一次，与评价不互抵）；超时 24 小时以上补记 -5。
-     */
-    @Transactional
-    public void applyCompletionOutcome(Task task) {
-        if (task.getRunnerId() == null || task.getDeliveredAt() == null) {
-            return;
-        }
-        if (!task.getDeliveredAt().isAfter(task.getDeadline())) {
-            applyEvent(task.getRunnerId(), CreditEventType.ON_TIME_COMPLETION, task.getTaskId(), 1,
-                    "任务「" + task.getTitle() + "」按时完成");
-        }
-        applyDeliveryOutcome(task);
-    }
+	private CreditScoreRecord applyChange(CreditScore account, CreditEventType type, String sourceId,
+			String reason, int requestedDelta, Long adminId) {
+		Instant now = Instant.now();
+		int before = account.getScore();
+		int after = clamp(before + requestedDelta);
+		boolean beforeRestricted = account.isRestricted();
+		boolean afterRestricted = nextRestricted(beforeRestricted, after);
+		int streak = nextStreak(account.getConsecutiveCompletedTasks(), type, requestedDelta);
 
-    // ---------------------------------------------------------------
-    // 查询
-    // ---------------------------------------------------------------
+		account.update(after, afterRestricted, streak, now);
+		scoreRepository.save(account);
+		int actualDelta = after - before;
+		CreditScoreRecord record = recordRepository.save(new CreditScoreRecord(
+				UUID.randomUUID().toString(), account.getUserId(), type, sourceId,
+				truncate(reason, 200), requestedDelta, actualDelta, before, after, adminId, now));
 
-    /** 本人信用分概览与变更记录（精确分值、档位、权限/恢复说明、分页记录）。 */
-    @Transactional
-    public MyCreditDto myCredit(long userId, int page, int size) {
-        CreditScore account = ensureAccount(userId);
-        CreditTier tier = CreditTier.fromScore(account.getScore());
-        Pageable pageable = PageRequest.of(page, size,
-                Sort.by(Sort.Direction.DESC, "createdAt", "recordId"));
-        Page<CreditScoreRecord> result = recordRepository.findByUserId(userId, pageable);
-        List<CreditRecordDto> items = new ArrayList<>(result.getContent().size());
-        for (CreditScoreRecord record : result.getContent()) {
-            items.add(CreditRecordDto.from(record));
-        }
-        return new MyCreditDto(account.getScore(), tier.name(), tier.label(),
-                tier.permissionHint(), tier.recoveryHint(),
-                PageResult.of(items, page, size, result.getTotalElements()));
-    }
+		if (actualDelta != 0 || CreditTier.fromScore(before) != CreditTier.fromScore(after)
+				|| beforeRestricted != afterRestricted) {
+			notifyScoreChange(account.getUserId(), before, after, beforeRestricted,
+					afterRestricted, reason, actualDelta);
+		}
+		if (after == 0 && before > 0) {
+			notifyAdminsOfZeroScore(account.getUserId());
+		}
+		if (type.isCompletion() && streak >= RECOVERY_STREAK && after < RESTORE_SCORE) {
+			int recoveryDelta = RESTORE_SCORE - after;
+			account.update(RESTORE_SCORE, false, 0, now);
+			scoreRepository.save(account);
+			recordRepository.save(new CreditScoreRecord(UUID.randomUUID().toString(),
+					account.getUserId(), CreditEventType.CONSECUTIVE_COMPLETION_RECOVERY,
+					"recovery:" + UUID.randomUUID(),
+					"连续完成 " + RECOVERY_STREAK + " 个任务且期间无负向信用事件",
+					recoveryDelta, recoveryDelta, after, RESTORE_SCORE, adminId, now));
+			safeNotifyCredit(account.getUserId(), "低分限制已解除",
+					"你已连续完成 " + RECOVERY_STREAK + " 个任务且期间没有负向信用事件，"
+							+ "信用分恢复至 " + RESTORE_SCORE + " 分，低分限制已解除。");
+		}
+		return record;
+	}
 
-    /** 他人主页：仅基本信息 + 档位 + 累计完成单数，无精确分值与明细。 */
-    @Transactional
-    public PublicUserProfileDto publicProfile(long targetUserId) {
-        AppUser user = userRepository.findById(targetUserId)
-                .orElseThrow(() -> new TaskException(ErrorCode.RESOURCE_NOT_FOUND, "用户不存在"));
-        CreditScore account = ensureAccount(targetUserId);
-        CreditTier tier = CreditTier.fromScore(account.getScore());
-        long completed = taskRepository.countByRunnerIdAndStatus(targetUserId, TaskStatus.COMPLETED);
-        return new PublicUserProfileDto(user.getUserId().toString(), user.getDisplayName(),
-                user.getRole().name(), tier.name(), tier.label(), completed, user.getCreatedAt());
-    }
+	// ---------------------------------------------------------------
+	// 查询
+	// ---------------------------------------------------------------
 
-    // ---------------------------------------------------------------
-    // 私有辅助
-    // ---------------------------------------------------------------
+	@Transactional
+	public CreditSummaryDto summary(long userId) {
+		requireUser(userId);
+		return CreditSummaryDto.from(ensureAccount(userId));
+	}
 
-    // 信用分通知失败不回滚记分：通知为独立事务，此处兜底并记录日志。
-    private void notifyChange(long userId, CreditEventType type, int actualDelta,
-                              int before, int after, String reason) {
-        if (actualDelta == 0) {
-            return;
-        }
-        String sign = actualDelta > 0 ? "+" : "";
-        String title = actualDelta > 0 ? "信用分提升" : "信用分变动";
-        String content = "你因「" + reason + "」" + sign + actualDelta + " 分，当前信用分 "
-                + before + " → " + after + "（" + CreditTier.fromScore(after).label() + "）。";
-        try {
-            notificationService.notify(userId, NotificationType.CREDIT, title, content, null);
-        } catch (Exception e) {
-            log.warn("写入信用分通知失败：recipient={}, event={}, reason={}", userId, type, e.getMessage());
-        }
-    }
+	/** 本人信用分概览与变更记录（精确分值、档位、权限/恢复说明、分页记录）。 */
+	@Transactional
+	public MyCreditDto myCredit(long userId, int page, int size) {
+		requireUser(userId);
+		CreditScore account = ensureAccount(userId);
+		CreditTier tier = CreditTier.fromScore(account.getScore());
+		Pageable pageable = Pagination.of(page, size,
+				Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "recordId")));
+		Page<CreditScoreRecord> result = recordRepository.findByUserId(userId, pageable);
+		List<CreditRecordDto> items = result.getContent().stream().map(CreditRecordDto::from).toList();
+		// 限制状态是独立持久化的：60–74 分但曾低于 60 的用户仍然受限，不能只看档位文案。
+		String permissionHint = account.isRestricted()
+				? RESTRICTED_PERMISSION_HINT
+				: tier.permissionHint();
+		String recoveryHint = account.isRestricted()
+				? RESTRICTED_RECOVERY_HINT
+				: tier.recoveryHint();
+		return new MyCreditDto(account.getScore(), tier.name(), tier.label(),
+				permissionHint, recoveryHint,
+				PageResult.of(items, page, size, result.getTotalElements()));
+	}
+
+	/** 管理员查询指定用户的变更记录。 */
+	@Transactional
+	public PageResult<CreditRecordDto> records(long userId, int page, int size) {
+		requireUser(userId);
+		ensureAccount(userId);
+		Pageable pageable = Pagination.of(page, size,
+				Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "recordId")));
+		Page<CreditScoreRecord> records = recordRepository.findByUserId(userId, pageable);
+		List<CreditRecordDto> items = records.getContent().stream().map(CreditRecordDto::from).toList();
+		return PageResult.of(items, page, size, records.getTotalElements());
+	}
+
+	/** 他人主页：仅基本信息 + 档位 + 累计完成单数，无精确分值与明细。 */
+	@Transactional
+	public PublicUserProfileDto publicProfile(long targetUserId) {
+		AppUser user = requireUser(targetUserId);
+		CreditScore account = ensureAccount(targetUserId);
+		CreditTier tier = CreditTier.fromScore(account.getScore());
+		long completed = taskRepository.countByRunnerIdAndStatus(targetUserId, TaskStatus.COMPLETED);
+		return new PublicUserProfileDto(user.getUserId().toString(), user.getDisplayName(),
+				user.getRole().name(), tier.name(), tier.label(), completed, user.getCreatedAt());
+	}
+
+	// ---------------------------------------------------------------
+	// 私有辅助
+	// ---------------------------------------------------------------
+
+	private AppUser requireUser(long userId) {
+		return userRepository.findById(userId)
+				.orElseThrow(() -> new TaskException(ErrorCode.RESOURCE_NOT_FOUND, "用户不存在"));
+	}
+
+	private void notifyScoreChange(Long userId, int before, int after, boolean beforeRestricted,
+			boolean afterRestricted, String reason, int actualDelta) {
+		StringBuilder content = new StringBuilder();
+		content.append("你的信用分由 ").append(before).append(" 分变为 ").append(after)
+				.append(" 分（").append(CreditTier.fromScore(after).label()).append("）。");
+		if (reason != null && !reason.isBlank()) {
+			content.append("变动原因：").append(reason).append('。');
+		}
+		if (!beforeRestricted && afterRestricted) {
+			content.append("已进入低分受限状态：不能接取普通任务，新发布任务需管理员复核；")
+					.append("恢复至 ").append(RESTORE_SCORE).append(" 分解除限制。");
+		}
+		else if (beforeRestricted && !afterRestricted) {
+			content.append("低分限制已解除，可正常接取和发布任务。");
+		}
+		String title = actualDelta > 0 ? "信用分提升" : "信用分变动";
+		safeNotifyCredit(userId, title, content.toString());
+	}
+
+	private void notifyAdminsOfZeroScore(Long userId) {
+		List<AppUser> admins = userRepository.findByRole(AppUserRole.ADMIN);
+		String content = "用户 " + userId + " 的信用分已降至 0 分，请管理员复核。";
+		for (AppUser admin : admins) {
+			try {
+				notificationService.notifySystem(admin.getUserId(), "信用分降至 0 分", content);
+			}
+			catch (RuntimeException failure) {
+				log.warn("写入管理员信用分通知失败：recipient={}, reason={}",
+						admin.getUserId(), failure.getMessage());
+			}
+		}
+	}
+
+	private void safeNotifyCredit(Long userId, String title, String content) {
+		try {
+			notificationService.notify(userId, NotificationType.CREDIT, title,
+					truncate(content, 500), null);
+		}
+		catch (RuntimeException failure) {
+			// 通知为独立事务，失败不回滚记分。
+			log.warn("写入信用分通知失败：recipient={}, reason={}", userId, failure.getMessage());
+		}
+	}
+
+	private static int nextStreak(int current, CreditEventType type, int requestedDelta) {
+		if (type.isCompletion()) {
+			return requestedDelta < 0 ? 0 : current + 1;
+		}
+		if (requestedDelta < 0) {
+			return 0;
+		}
+		return current;
+	}
+
+	static int clamp(int score) {
+		return Math.max(MIN_SCORE, Math.min(MAX_SCORE, score));
+	}
+
+	static boolean nextRestricted(boolean currentlyRestricted, int score) {
+		if (score < RESTRICTED_BELOW) {
+			return true;
+		}
+		if (score >= RESTORE_SCORE) {
+			return false;
+		}
+		return currentlyRestricted;
+	}
+
+	private static String truncate(String value, int max) {
+		if (value == null) {
+			return null;
+		}
+		return value.length() <= max ? value : value.substring(0, max);
+	}
 }

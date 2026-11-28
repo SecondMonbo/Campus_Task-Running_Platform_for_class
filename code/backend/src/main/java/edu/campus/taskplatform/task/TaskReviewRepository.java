@@ -1,10 +1,10 @@
 package edu.campus.taskplatform.task;
 
+import java.time.Instant;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-
-import java.time.Instant;
 
 public interface TaskReviewRepository extends JpaRepository<TaskReview, String> {
 

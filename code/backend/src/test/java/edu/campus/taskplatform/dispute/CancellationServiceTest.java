@@ -10,12 +10,16 @@ import java.util.UUID;
 import edu.campus.taskplatform.common.api.PageResult;
 import edu.campus.taskplatform.common.error.ApiException;
 import edu.campus.taskplatform.common.error.ErrorCode;
+import edu.campus.taskplatform.credit.CreditEvent;
+import edu.campus.taskplatform.credit.CreditEventRepository;
+import edu.campus.taskplatform.credit.CreditEventType;
 import edu.campus.taskplatform.dispute.cancellation.CancellationDecision;
 import edu.campus.taskplatform.dispute.cancellation.CancellationRequestDto;
 import edu.campus.taskplatform.dispute.cancellation.CancellationRequestRepository;
 import edu.campus.taskplatform.dispute.cancellation.CancellationRuling;
 import edu.campus.taskplatform.dispute.cancellation.CancellationService;
 import edu.campus.taskplatform.dispute.cancellation.CancellationStatus;
+import edu.campus.taskplatform.dispute.cancellation.ResponsibleParty;
 import edu.campus.taskplatform.dispute.cancellation.dto.CancellationArbitrationRequest;
 import edu.campus.taskplatform.dispute.cancellation.dto.CancellationResponseRequest;
 import edu.campus.taskplatform.dispute.cancellation.dto.CreateCancellationRequest;
@@ -51,6 +55,9 @@ class CancellationServiceTest {
 	CancellationRequestRepository repository;
 
 	@Autowired
+	CreditEventRepository creditEvents;
+
+	@Autowired
 	MutableCurrentUserPort currentUser;
 
 	@Autowired
@@ -68,6 +75,7 @@ class CancellationServiceTest {
 	@BeforeEach
 	void setUp() {
 		repository.deleteAll();
+		creditEvents.deleteAll();
 		taskPort.reset();
 		ledger.reset();
 		currentUser.signOut();
@@ -181,6 +189,68 @@ class CancellationServiceTest {
 		assertEquals("已送达，不同意取消", dto.responseNote());
 		assertEquals(TaskStatus.WAITING_FOR_ACCEPTANCE, taskPort.get(taskId).status());
 		assertTrue(ledger.settlements().isEmpty());
+	}
+
+	@Test
+	void respond_approve_recordsResponsiblePartyCreditEvent() {
+		givenTask(TaskStatus.IN_PROGRESS);
+		UUID requestId = givenPendingRequest(publisher);
+
+		currentUser.signInAsUser(runner);
+		CancellationRequestDto dto = service.respond(requestId,
+				new CancellationResponseRequest(CancellationDecision.APPROVE,
+						ResponsibleParty.RESPONDER, "同意取消"));
+
+		assertEquals(ResponsibleParty.RESPONDER, dto.responsibleParty());
+		assertEquals(1, creditEvents.count());
+		CreditEvent event = creditEvents.findAll().get(0);
+		assertEquals(CreditEventType.RESPONSIBLE_CANCELLATION, event.getEventType());
+		assertEquals(runner, event.getUserId());
+		assertEquals(-5, event.getRequestedDelta());
+		assertEquals(requestId.toString(), event.getSourceId());
+	}
+
+	@Test
+	void respond_reject_cannotAssignResponsibleParty() {
+		givenTask(TaskStatus.IN_PROGRESS);
+		UUID requestId = givenPendingRequest(publisher);
+
+		currentUser.signInAsUser(runner);
+		assertApiError(() -> service.respond(requestId,
+				new CancellationResponseRequest(CancellationDecision.REJECT,
+						ResponsibleParty.REQUESTER, "拒绝")), ErrorCode.VALIDATION_ERROR);
+		assertEquals(0, creditEvents.count());
+		assertEquals(CancellationStatus.PENDING_RESPONSE,
+				repository.findById(requestId).orElseThrow().getStatus());
+	}
+
+	@Test
+	void arbitrate_supportContinue_cannotAssignResponsibleParty() {
+		givenTask(TaskStatus.IN_PROGRESS);
+		UUID requestId = givenPendingAdminRequest();
+
+		currentUser.signInAsAdmin(admin);
+		assertApiError(() -> service.arbitrate(requestId, new CancellationArbitrationRequest(
+				CancellationRuling.SUPPORT_CONTINUE, 0, 0, ResponsibleParty.REQUESTER, "继续")),
+				ErrorCode.VALIDATION_ERROR);
+		assertEquals(0, creditEvents.count());
+	}
+
+	@Test
+	void arbitrate_cancel_recordsResponsiblePartyCreditEvent() {
+		givenTask(TaskStatus.WAITING_FOR_ACCEPTANCE);
+		UUID requestId = givenPendingAdminRequest();
+
+		currentUser.signInAsAdmin(admin);
+		service.arbitrate(requestId, new CancellationArbitrationRequest(
+				CancellationRuling.SUPPORT_REQUESTER_CANCEL, REWARD, 0,
+				ResponsibleParty.REQUESTER, "申请人有责"));
+
+		assertEquals(1, creditEvents.count());
+		CreditEvent event = creditEvents.findAll().get(0);
+		assertEquals(publisher, event.getUserId());
+		assertEquals(CreditEventType.RESPONSIBLE_CANCELLATION, event.getEventType());
+		assertEquals(-5, event.getRequestedDelta());
 	}
 
 	@Test

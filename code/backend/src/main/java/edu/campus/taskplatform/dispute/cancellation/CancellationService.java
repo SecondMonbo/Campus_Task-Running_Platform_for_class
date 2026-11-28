@@ -8,6 +8,8 @@ import java.util.UUID;
 import edu.campus.taskplatform.common.api.PageResult;
 import edu.campus.taskplatform.common.error.ApiException;
 import edu.campus.taskplatform.common.error.ErrorCode;
+import edu.campus.taskplatform.credit.CreditEventPublisher;
+import edu.campus.taskplatform.credit.CreditEventType;
 import edu.campus.taskplatform.common.web.Pagination;
 import edu.campus.taskplatform.dispute.cancellation.dto.CancellationArbitrationRequest;
 import edu.campus.taskplatform.dispute.cancellation.dto.CancellationResponseRequest;
@@ -48,13 +50,15 @@ public class CancellationService {
 	private final TaskParticipationPort taskPort;
 	private final LedgerPort ledgerPort;
 	private final CurrentUserPort currentUserPort;
+	private final CreditEventPublisher creditEvents;
 
 	public CancellationService(CancellationRequestRepository repository, TaskParticipationPort taskPort,
-			LedgerPort ledgerPort, CurrentUserPort currentUserPort) {
+			LedgerPort ledgerPort, CurrentUserPort currentUserPort, CreditEventPublisher creditEvents) {
 		this.repository = repository;
 		this.taskPort = taskPort;
 		this.ledgerPort = ledgerPort;
 		this.currentUserPort = currentUserPort;
+		this.creditEvents = creditEvents;
 	}
 
 	/**
@@ -105,13 +109,18 @@ public class CancellationService {
 
 		Instant now = Instant.now();
 		String note = trimToNull(command.note());
+		ResponsibleParty responsibleParty = command.responsibleParty();
+		if (command.decision() == CancellationDecision.REJECT && responsibleParty.isResponsible()) {
+			throw new ApiException(ErrorCode.VALIDATION_ERROR, "拒绝取消时责任方必须为 NONE");
+		}
 		if (command.decision() == CancellationDecision.APPROVE) {
 			if (!task.isCancellable()) {
 				throw new ApiException(ErrorCode.TASK_STATE_CONFLICT, "任务当前状态不允许取消");
 			}
-			request.approve(user.userId(), now, task.reward(), note);
+			request.approve(user.userId(), now, task.reward(), note, responsibleParty);
 			ledgerPort.settleFrozenReward(task.taskId(), task.publisherId(), task.runnerId(), task.reward(), 0);
 			taskPort.cancelTask(task.taskId());
+			publishResponsibleEvent(request, responsibleParty, "同意取消");
 		}
 		else {
 			request.reject(user.userId(), now, note);
@@ -137,6 +146,10 @@ public class CancellationService {
 
 		int refundAmount = command.refundAmount();
 		int runnerAmount = command.runnerAmount();
+		ResponsibleParty responsibleParty = command.responsibleParty();
+		if (command.ruling() == CancellationRuling.SUPPORT_CONTINUE && responsibleParty.isResponsible()) {
+			throw new ApiException(ErrorCode.VALIDATION_ERROR, "支持继续履约时责任方必须为 NONE");
+		}
 		switch (command.ruling()) {
 			case SUPPORT_CONTINUE -> {
 				if (refundAmount != 0 || runnerAmount != 0) {
@@ -158,8 +171,11 @@ public class CancellationService {
 			}
 		}
 
-		request.arbitrate(admin.userId(), Instant.now(), command.ruling(),
+		request.arbitrate(admin.userId(), Instant.now(), command.ruling(), responsibleParty,
 				command.rulingDetail().trim(), refundAmount, runnerAmount);
+		if (command.ruling() != CancellationRuling.SUPPORT_CONTINUE) {
+			publishResponsibleEvent(request, responsibleParty, "管理员裁决取消");
+		}
 		return CancellationRequestDto.from(request);
 	}
 
@@ -180,6 +196,26 @@ public class CancellationService {
 	private void applyCancellation(TaskSnapshot task, int refundAmount, int runnerAmount) {
 		ledgerPort.settleFrozenReward(task.taskId(), task.publisherId(), task.runnerId(), refundAmount, runnerAmount);
 		taskPort.cancelTask(task.taskId());
+	}
+
+	/**
+	 * 取消生效后为明确认定的责任方记录 -5 信用分事件。责任判定只来自请求字段，
+	 * 不从退款/支付比例推断；双方无责时不记分。
+	 */
+	private void publishResponsibleEvent(CancellationRequestEntity request,
+			ResponsibleParty responsibleParty, String context) {
+		if (!responsibleParty.isResponsible()) {
+			return;
+		}
+		Long responsibleUserId = responsibleParty == ResponsibleParty.REQUESTER
+				? request.getRequesterId()
+				: request.getRespondedBy();
+		if (responsibleUserId == null) {
+			return;
+		}
+		String role = responsibleParty == ResponsibleParty.REQUESTER ? "申请人" : "被申请人";
+		creditEvents.publish(responsibleUserId, CreditEventType.RESPONSIBLE_CANCELLATION,
+				request.getRequestId().toString(), -5, context + "，责任方为" + role);
 	}
 
 	private CancellationRequestEntity lockRequest(UUID requestId) {

@@ -113,7 +113,7 @@ class UserCenterIntegrationTest {
 				.andExpect(jsonPath("$.data.phone").value("13800000000"))
 				.andExpect(jsonPath("$.data.role").value("USER"))
 				.andExpect(jsonPath("$.data.createdAt").isString())
-				// 信誉分：信用分服务初始化 80 分，评价数量为 0。
+				// 信用分机制已接入：新用户初始化为 80；暂无评价时 rating 为空。
 				.andExpect(jsonPath("$.data.rating").doesNotExist())
 				.andExpect(jsonPath("$.data.creditScore").value(80))
 				.andExpect(jsonPath("$.data.reviewCount").value(0));

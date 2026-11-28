@@ -1,10 +1,17 @@
 package edu.campus.taskplatform.task;
 
+import edu.campus.taskplatform.auth.AppUser;
+
 import jakarta.persistence.Column;
+import jakarta.persistence.ConstraintMode;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 
@@ -65,6 +72,17 @@ public class Task {
     @Column(name = "cancel_reason", length = 200)
     private String cancelReason;
 
+    /** 发布复核状态；与任务状态解耦，用于控制是否进入公开待接单列表。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "publication_review_status", nullable = false, length = 24)
+    private PublicationReviewStatus publicationReviewStatus = PublicationReviewStatus.NOT_REQUIRED;
+
+    /** 只读关联，用于任务列表按发布者信用档位排序；写入仍使用 publisherId。 */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "publisher_id", insertable = false, updatable = false,
+            foreignKey = @ForeignKey(ConstraintMode.NO_CONSTRAINT))
+    private AppUser publisher;
+
     /** 乐观锁版本号；接单并发另用悲观锁兜底。 */
     @Version
     @Column(nullable = false)
@@ -86,6 +104,7 @@ public class Task {
         this.deliveryLocation = deliveryLocation;
         this.status = TaskStatus.WAITING_FOR_TAKER;
         this.publishedAt = publishedAt;
+        this.publicationReviewStatus = PublicationReviewStatus.NOT_REQUIRED;
     }
 
     public String getTaskId() {
@@ -194,5 +213,13 @@ public class Task {
 
     public void setCancelReason(String cancelReason) {
         this.cancelReason = cancelReason;
+    }
+
+    public PublicationReviewStatus getPublicationReviewStatus() {
+        return publicationReviewStatus;
+    }
+
+    public void setPublicationReviewStatus(PublicationReviewStatus publicationReviewStatus) {
+        this.publicationReviewStatus = publicationReviewStatus;
     }
 }

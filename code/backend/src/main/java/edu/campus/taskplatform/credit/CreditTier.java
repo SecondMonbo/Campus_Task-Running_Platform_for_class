@@ -46,7 +46,7 @@ public enum CreditTier {
         return RESTRICTED;
     }
 
-    /** 本人可见的当前权限说明；限制的执行细节由后续版本接入。 */
+    /** 本人可见的当前权限说明。 */
     public String permissionHint() {
         return switch (this) {
             case EXCELLENT -> "信用优秀，可正常发布与接取任务。";
@@ -56,7 +56,7 @@ public enum CreditTier {
         };
     }
 
-    /** 恢复条件说明（连续履约恢复由后续版本执行）。 */
+    /** 恢复条件说明。 */
     public String recoveryHint() {
         return switch (this) {
             case EXCELLENT, GOOD -> "保持按时完成与良好评价即可维持当前档位。";

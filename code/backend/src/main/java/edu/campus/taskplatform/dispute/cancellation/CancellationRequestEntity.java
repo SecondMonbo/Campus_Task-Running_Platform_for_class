@@ -54,6 +54,11 @@ public class CancellationRequestEntity {
 	@Column(name = "runner_amount", nullable = false)
 	private int runnerAmount;
 
+	/** 取消生效时认定的责任方；未生效或双方无责时为 null / NONE。 */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "responsible_party", length = 16)
+	private ResponsibleParty responsibleParty;
+
 	@Column(name = "responded_by")
 	private Long respondedBy;
 
@@ -105,7 +110,8 @@ public class CancellationRequestEntity {
 	/**
 	 * 被申请方同意取消：申请直接生效，冻结报酬全额退回发布者。
 	 */
-	public void approve(Long responderId, Instant now, int fullReward, String note) {
+	public void approve(Long responderId, Instant now, int fullReward, String note,
+			ResponsibleParty responsibleParty) {
 		requirePendingResponse();
 		this.status = CancellationStatus.APPROVED;
 		this.respondedBy = responderId;
@@ -113,10 +119,11 @@ public class CancellationRequestEntity {
 		this.responseNote = note;
 		this.refundAmount = fullReward;
 		this.runnerAmount = 0;
+		this.responsibleParty = responsibleParty;
 	}
 
 	/**
-	 * 被申请方拒绝：申请转入待管理员处理，任务与账务均不变化。
+	 * 被申请方拒绝：申请转入待管理员处理，任务与账务均不变化；拒绝时责任方必须为 NONE。
 	 */
 	public void reject(Long responderId, Instant now, String note) {
 		requirePendingResponse();
@@ -124,18 +131,20 @@ public class CancellationRequestEntity {
 		this.respondedBy = responderId;
 		this.respondedAt = now;
 		this.responseNote = note;
+		this.responsibleParty = ResponsibleParty.NONE;
 	}
 
 	/**
 	 * 管理员裁决。支持继续时金额必须为 0；取消类裁决由调用方校验金额拆分。
 	 */
-	public void arbitrate(Long adminId, Instant now, CancellationRuling ruling, String detail,
-			int refundAmount, int runnerAmount) {
+	public void arbitrate(Long adminId, Instant now, CancellationRuling ruling,
+			ResponsibleParty responsibleParty, String detail, int refundAmount, int runnerAmount) {
 		if (this.status != CancellationStatus.PENDING_ADMIN) {
 			throw new IllegalStateException("只有待管理员处理的取消申请可以裁决");
 		}
 		this.status = CancellationStatus.ARBITRATED;
 		this.ruling = ruling;
+		this.responsibleParty = responsibleParty;
 		this.rulingDetail = detail;
 		this.refundAmount = refundAmount;
 		this.runnerAmount = runnerAmount;
@@ -187,6 +196,10 @@ public class CancellationRequestEntity {
 
 	public int getRunnerAmount() {
 		return runnerAmount;
+	}
+
+	public ResponsibleParty getResponsibleParty() {
+		return responsibleParty;
 	}
 
 	public Long getRespondedBy() {

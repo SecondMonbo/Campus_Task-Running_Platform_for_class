@@ -10,9 +10,11 @@ import edu.campus.taskplatform.auth.CurrentUser;
 import edu.campus.taskplatform.common.ErrorCode;
 import edu.campus.taskplatform.common.PageResult;
 import edu.campus.taskplatform.common.TaskException;
+import edu.campus.taskplatform.credit.CreditEventRepository;
 import edu.campus.taskplatform.credit.CreditEventType;
 import edu.campus.taskplatform.credit.CreditScoreRecord;
 import edu.campus.taskplatform.credit.CreditScoreRecordRepository;
+import edu.campus.taskplatform.credit.CreditScoreRepository;
 import edu.campus.taskplatform.credit.CreditScoreService;
 import edu.campus.taskplatform.task.dto.CreateReviewRequest;
 import edu.campus.taskplatform.task.dto.TaskCreateRequest;
@@ -52,7 +54,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 @SpringBootTest
 @ActiveProfiles("test")
-@TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
+@TestPropertySource(properties = {
+        "spring.jpa.hibernate.ddl-auto=create-drop",
+        "credit.events.auto-process=true",
+        "credit.events.retry-enabled=false"
+})
 class TaskServiceIntegrationTest {
 
     @Autowired
@@ -85,11 +91,20 @@ class TaskServiceIntegrationTest {
     @Autowired
     CreditScoreRecordRepository creditRecordRepository;
 
+    @Autowired
+    CreditScoreRepository creditScoreRepository;
+
+    @Autowired
+    CreditEventRepository creditEventRepository;
+
     private CurrentUser publisher;
     private CurrentUser runner;
 
     @BeforeEach
     void setUp() {
+        creditEventRepository.deleteAll();
+        creditRecordRepository.deleteAll();
+        creditScoreRepository.deleteAll();
         reviewRepository.deleteAll();
         operationLogRepository.deleteAll();
         taskRepository.deleteAll();

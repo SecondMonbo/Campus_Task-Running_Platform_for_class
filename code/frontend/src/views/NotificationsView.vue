@@ -26,7 +26,9 @@ const { items, total, page, size, loading, error, reload } = usePaged(
 )
 const emptyText = computed(
   () =>
-    ({ TASK: '暂无任务通知', SYSTEM: '暂无系统通知' })[type.value] || '暂无通知',
+    ({ TASK: '暂无任务通知', SYSTEM: '暂无系统通知', CREDIT: '暂无信用分通知' })[
+      type.value
+    ] || '暂无通知',
 )
 async function open(item, navigate = true) {
   if (busy.value.has(item.notificationId)) return
@@ -81,6 +83,13 @@ async function open(item, navigate = true) {
           >
             系统通知
           </button>
+          <button
+            :class="{ active: type === 'CREDIT' }"
+            :aria-pressed="type === 'CREDIT'"
+            @click="type = 'CREDIT'"
+          >
+            信用分通知
+          </button>
         </div>
         <button
           class="button secondary small"
@@ -105,7 +114,12 @@ async function open(item, navigate = true) {
             :class="{ unread: !item.read, system: item.type === 'SYSTEM' }"
           >
             <span class="notification-icon" :class="{ system: item.type === 'SYSTEM' }">
-              <AppIcon :name="item.type === 'SYSTEM' ? 'megaphone' : 'bell'" :size="20" />
+              <AppIcon
+                :name="
+                  item.type === 'SYSTEM' ? 'megaphone' : item.type === 'CREDIT' ? 'shield' : 'bell'
+                "
+                :size="20"
+              />
             </span>
             <div class="notification-content">
               <div>

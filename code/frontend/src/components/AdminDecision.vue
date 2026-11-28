@@ -9,7 +9,12 @@ import {
 } from '../domain/tasks.js'
 import AppModal from './AppModal.vue'
 import AsyncPanel from './AsyncPanel.vue'
-import { complaintActions, recordOnlyActions, validateComplaintDecision } from '../domain/admin.js'
+import {
+  complaintActions,
+  creditDeductionOptions,
+  openComplaintActions,
+  validateComplaintDecision,
+} from '../domain/admin.js'
 const props = defineProps({ kind: String, record: Object })
 const emit = defineEmits(['close'])
 const busy = ref(false)
@@ -18,11 +23,13 @@ const form = ref({
   ruling: 'SUPPORT_REQUESTER_CANCEL',
   refundAmount: 0,
   runnerAmount: 0,
+  responsibleParty: 'NONE',
   rulingDetail: '',
   result: 'REJECTED',
   transferAmount: 0,
   decisionNote: '',
   actions: ['LOG_ONLY'],
+  creditAdjustment: -2,
 })
 const {
   data: task,
@@ -40,6 +47,7 @@ const titles = {
 function resetAllocation() {
   form.value.refundAmount = 0
   form.value.runnerAmount = 0
+  if (form.value.ruling === 'SUPPORT_CONTINUE') form.value.responsibleParty = 'NONE'
 }
 async function submit() {
   if (busy.value) return
@@ -51,6 +59,8 @@ async function submit() {
       ruling: values.ruling,
       refundAmount: Number(values.refundAmount),
       runnerAmount: Number(values.runnerAmount),
+      responsibleParty:
+        values.ruling === 'SUPPORT_CONTINUE' ? 'NONE' : values.responsibleParty,
       rulingDetail: values.rulingDetail.trim(),
     }
     error.value = validateCancellationRuling(body, task.value?.reward)
@@ -62,8 +72,17 @@ async function submit() {
     }
     error.value = validateAppealDecision(body)
   } else {
-    body = { actions: [...values.actions], decisionNote: values.decisionNote.trim() }
-    error.value = validateComplaintDecision(body)
+    body = {
+      actions: [...values.actions],
+      decisionNote: values.decisionNote.trim(),
+    }
+    if (values.actions.includes('CREDIT_ADJUSTMENT')) {
+      body.creditAdjustment = Number(values.creditAdjustment)
+    }
+    error.value = validateComplaintDecision({
+      ...body,
+      creditAdjustment: body.creditAdjustment ?? null,
+    })
   }
   if (error.value) return
   busy.value = true
@@ -129,6 +148,25 @@ async function submit() {
             <option value="SUPPORT_CONTINUE">支持继续履约</option>
             <option value="CANCEL_PROPORTIONALLY">按比例取消</option>
           </select>
+        </label>
+        <label class="field">
+          责任方
+          <select
+            v-model="form.responsibleParty"
+            :disabled="form.ruling === 'SUPPORT_CONTINUE'"
+            required
+          >
+            <option value="NONE">双方无责</option>
+            <option value="REQUESTER">取消申请人有责</option>
+            <option value="RESPONDER">被申请人有责</option>
+          </select>
+          <span class="small muted">
+            {{
+              form.ruling === 'SUPPORT_CONTINUE'
+                ? '支持继续履约时责任方必须为双方无责。'
+                : '责任判定独立于退款/支付金额；有责一方将扣 5 信用分。'
+            }}
+          </span>
         </label>
         <div class="form-columns">
           <label class="field">
@@ -196,12 +234,32 @@ async function submit() {
               v-model="form.actions"
               type="checkbox"
               :value="value"
-              :disabled="!recordOnlyActions.includes(value)"
+              :disabled="
+                !openComplaintActions.includes(value) ||
+                (value === 'CREDIT_ADJUSTMENT' && !record.targetUserId)
+              "
             />
             {{ label }}
-            <span v-if="!recordOnlyActions.includes(value)" class="small muted">暂未开放</span>
+            <span v-if="!openComplaintActions.includes(value)" class="small muted">暂未开放</span>
+            <span
+              v-else-if="value === 'CREDIT_ADJUSTMENT' && !record.targetUserId"
+              class="small muted"
+            >
+              未指定被投诉人
+            </span>
           </label>
         </fieldset>
+        <label v-if="form.actions.includes('CREDIT_ADJUSTMENT')" class="field">
+          信用扣分档位
+          <select v-model="form.creditAdjustment" required>
+            <option v-for="points in creditDeductionOptions" :key="points" :value="points">
+              {{ points }} 分（{{ points === -2 ? '轻微' : points === -5 ? '一般' : '严重' }}）
+            </option>
+          </select>
+          <span class="small muted">
+            仅投诉指定了被投诉用户时可用；每条投诉最多扣一次。
+          </span>
+        </label>
         <label class="field">
           处理说明
           <textarea
@@ -214,7 +272,7 @@ async function submit() {
         </label>
       </template>
       <p v-if="kind === 'complaints'" class="notice">
-        本次仅保存处理记录。提醒与线下移交需另行完成；扣分、调账、限制功能和冻结账号暂未开放。
+        提醒与线下移交需另行完成；信用扣分按所选档位写入并通知用户；调账、限制功能和冻结账号暂未开放。
       </p>
       <p v-else class="notice">请核对处理结论和金额后提交。</p>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>

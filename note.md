@@ -222,3 +222,18 @@ cd code\frontend; npm install; npm run dev    # 5173
 - `lowStarOutsideThirtyDayWindowIsTreatedAsFirstLowStar`：31 天前的旧低星不参与去重，本次仍按首次低星扣分。
 
 修复后回归：后端 **154 tests, 0 failures**；前端 **41 pass**，构建成功；真实 PostgreSQL 上修复版后端启动正常，跑腿员 83 分、3 条记录读取正确。
+
+---
+
+# 2026-11-26 合并到 dev-Aurora：信用分实现统一
+
+`origin/main`（PR #18）与 `dev-Aurora` 各自实现了信用分。合并时以 **main 的 `credit_score` / `credit_score_record`** 作为唯一分数与台账来源，同时保留 dev-Aurora 的 `credit_event` outbox、低分限制、发布复核、投诉/取消责任扣分与管理员复核。具体变化：
+
+- `app_user` 上的 `credit_score`、`credit_restricted`、`consecutive_completed_tasks` 移除；限制状态与连续履约计数并入 `credit_score`，由同一行锁串行更新。
+- 业务事务只写 `credit_event` outbox；`CreditEventPublisher` 使用数据库原子 upsert（PostgreSQL `ON CONFLICT DO NOTHING`、H2 `MERGE … WHEN NOT MATCHED`），不再捕获唯一约束异常，避免 rollback-only 污染外层事务。
+- 评价的 30 天低星窗口判定先锁 `credit_score` 行，再统计窗口内低星数量；并发评价串行化。
+- 本人接口为 `GET /users/me/credit`（`MyCredit`，含内嵌 `records`），他人主页为 `GET /users/{userId}/profile`；管理员接口不变。
+- 信用分变更通知使用 `CREDIT` 类型；用户主动发起信用复核仍未实现。
+- 迁移 `V2026112601__merge_credit_score_state.sql` 合并两套数据；`credit_record` 保留为历史备份表，不再由实体读写。
+
+上述“前后端 A”章节中“没有 outbox / 低分限制未接入”的描述反映的是合并前的 Part A 实现，合并后以本节为准。
